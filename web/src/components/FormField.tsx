@@ -5,21 +5,32 @@ import {
   Text,
   TextField,
 } from "react-aria-components";
+import type { HTMLInputTypeAttribute, Ref } from "react";
 
 export function FormField({
   label,
   description,
+  autoComplete,
   defaultValue,
+  errorMessage,
+  inputRef,
   isDisabled = false,
   isInvalid = false,
-  errorMessage = "Check this value and try again.",
+  isRequired = false,
+  name,
+  type = "text",
 }: {
   label: string;
   description: string;
+  autoComplete?: string;
   defaultValue?: string;
   isDisabled?: boolean;
   isInvalid?: boolean;
   errorMessage?: string;
+  inputRef?: Ref<HTMLInputElement>;
+  isRequired?: boolean;
+  name?: string;
+  type?: HTMLInputTypeAttribute;
 }) {
   return (
     <TextField
@@ -27,11 +38,13 @@ export function FormField({
       defaultValue={defaultValue}
       isDisabled={isDisabled}
       isInvalid={isInvalid}
+      isRequired={isRequired}
+      name={name}
     >
       <Label>{label}</Label>
-      <Input />
+      <Input autoComplete={autoComplete} ref={inputRef} type={type} />
       <Text slot="description">{description}</Text>
-      <FieldError>{errorMessage}</FieldError>
+      {errorMessage ? <FieldError>{errorMessage}</FieldError> : null}
     </TextField>
   );
 }

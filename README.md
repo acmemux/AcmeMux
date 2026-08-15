@@ -34,12 +34,21 @@ Build the native executable at `dist/acmemux`:
 make build
 ```
 
-Start a local development instance with application-owned state under
-`./var`:
+Bootstrap the only administrator from a local terminal, then start a local
+development instance with application-owned state under `./var` and an
+explicit HTTPS browser origin:
 
 ```sh
-make run
+./dist/acmemux admin bootstrap --state-dir ./var
+./dist/acmemux serve \
+  --state-dir ./var \
+  --public-origin https://acmemux.example.test \
+  --trusted-proxies 127.0.0.1/32
 ```
+
+The authenticated browser is intentionally unavailable over direct HTTP. A
+local HTTPS reverse proxy must preserve the public `Host` and can supply the
+client chain only from an explicitly trusted loopback address.
 
 The service exposes liveness at `/healthz`, readiness at `/readyz`, and the
 embedded browser application at `/`. The default listener is
@@ -50,4 +59,6 @@ See [docs/architecture.md](docs/architecture.md),
 [docs/dependencies.md](docs/dependencies.md) for the current application
 boundaries and contributor workflow. The accepted visual and component rules
 are documented in [docs/visual-system.md](docs/visual-system.md); run
-`make catalog` to inspect the isolated component catalog.
+`make catalog` to inspect the isolated component catalog. Administrator,
+session, HTTPS, and reverse-proxy operation is documented in
+[docs/security.md](docs/security.md).

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { mockSession } from "./support/session";
+
 const fullPageSnapshot = {
   animations: "disabled" as const,
   fullPage: true,
@@ -10,6 +12,7 @@ test.describe("wide visual contract", () => {
   test.use({ viewport: { width: 1440, height: 1100 } });
 
   test("application shell", async ({ page }) => {
+    await mockSession(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Certificate operations" }),
@@ -36,12 +39,37 @@ test.describe("wide visual contract", () => {
       maxDiffPixelRatio: 0.001,
     });
   });
+
+  test("administrator sign-in", async ({ page }) => {
+    await mockSession(page, "signed_out");
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: "Administrator sign in" }),
+    ).toBeVisible();
+    await expect(page).toHaveScreenshot(
+      "administrator-sign-in-wide.png",
+      fullPageSnapshot,
+    );
+  });
+
+  test("local administrator bootstrap guidance", async ({ page }) => {
+    await mockSession(page, "uninitialized");
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: "Administrator not initialized" }),
+    ).toBeVisible();
+    await expect(page).toHaveScreenshot(
+      "administrator-uninitialized-wide.png",
+      fullPageSnapshot,
+    );
+  });
 });
 
 test.describe("narrow visual contract", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("application shell", async ({ page }) => {
+    await mockSession(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Certificate operations" }),
@@ -59,6 +87,18 @@ test.describe("narrow visual contract", () => {
     ).toBeVisible();
     await expect(page).toHaveScreenshot(
       "component-catalog-narrow.png",
+      fullPageSnapshot,
+    );
+  });
+
+  test("administrator sign-in", async ({ page }) => {
+    await mockSession(page, "signed_out");
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: "Administrator sign in" }),
+    ).toBeVisible();
+    await expect(page).toHaveScreenshot(
+      "administrator-sign-in-narrow.png",
       fullPageSnapshot,
     );
   });

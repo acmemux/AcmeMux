@@ -7,6 +7,8 @@ The foundation uses a deliberately small production dependency set.
 | Go | 1.26.6 | Native service toolchain | BSD-3-Clause; maintained Go release with the current standard-library security fixes |
 | Node.js / npm | 20.19.2 / 9.2.0 | Browser build and test toolchain only | MIT / Artistic-2.0; Debian security-maintained Node.js package and locked npm CLI |
 | modernc.org/sqlite | 1.56.0 | Pure-Go SQLite driver | BSD-3-Clause; current canonical release with active release history |
+| golang.org/x/crypto | 0.55.0 | Argon2id password verification | BSD-3-Clause; current Go cryptography subrepository release maintained by the Go project |
+| golang.org/x/term | 0.45.0 | No-echo local administrator password input | BSD-3-Clause; current Go terminal subrepository release maintained by the Go project |
 | React / React DOM | 19.2.8 | Browser component runtime | MIT; current npm releases |
 | React Aria Components | 1.20.0 | Headless accessible component behavior | Apache-2.0; current Adobe React Spectrum release with React 19 support |
 
@@ -27,7 +29,7 @@ Direct build and verification dependencies are also exact-pinned:
 
 Direct verification dependencies are pinned in `web/package.json` and the
 application Makefile. `go.sum` and `package-lock.json` lock the complete
-dependency graphs. `govulncheck` and `npm audit --audit-level=high` are
+dependency graphs. `govulncheck` and `npm audit --audit-level=low` are
 mandatory verification gates.
 
 Dependency changes require review of upstream maintenance, licenses, supported

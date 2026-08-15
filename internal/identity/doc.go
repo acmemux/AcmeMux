@@ -1,3 +1,3 @@
-// Package identity owns the single-administrator and session boundary.
-// Authentication behavior is introduced by its dedicated delivery task.
+// Package identity owns the password-only single-administrator and session
+// boundary. It stores only password verifiers and hashes of browser tokens.
 package identity

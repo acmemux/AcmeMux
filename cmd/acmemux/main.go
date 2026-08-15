@@ -14,6 +14,7 @@ import (
 
 	"github.com/sgurden-certleap/AcmeMux/internal/appconfig"
 	"github.com/sgurden-certleap/AcmeMux/internal/httpapi"
+	"github.com/sgurden-certleap/AcmeMux/internal/identity"
 	"github.com/sgurden-certleap/AcmeMux/internal/state"
 	"github.com/sgurden-certleap/AcmeMux/internal/webassets"
 )
@@ -28,9 +29,20 @@ func main() {
 }
 
 func run(arguments []string) error {
-	if len(arguments) > 0 && arguments[0] == "serve" {
-		arguments = arguments[1:]
+	if len(arguments) == 0 {
+		return errors.New("a command is required: serve or admin")
 	}
+	switch arguments[0] {
+	case "serve":
+		return runServer(arguments[1:])
+	case "admin":
+		return runAdministrator(arguments[1:], defaultAdministratorEnvironment())
+	default:
+		return errors.New("unknown command: expected serve or admin")
+	}
+}
+
+func runServer(arguments []string) error {
 	config, err := appconfig.Load(arguments, os.Getenv)
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
@@ -41,13 +53,23 @@ func run(arguments []string) error {
 		return fmt.Errorf("open application state: %w", err)
 	}
 	defer database.Close()
+	identityService, err := identity.New(database)
+	if err != nil {
+		return fmt.Errorf("initialize administrator identity: %w", err)
+	}
 
 	assets, err := webassets.FS()
 	if err != nil {
 		return fmt.Errorf("open embedded browser assets: %w", err)
 	}
 
-	handler := httpapi.New(database, assets)
+	handler, err := httpapi.New(database, identityService, assets, httpapi.SecurityConfig{
+		PublicOrigin:   config.PublicOrigin,
+		TrustedProxies: config.TrustedProxies,
+	})
+	if err != nil {
+		return fmt.Errorf("configure HTTP security: %w", err)
+	}
 	server := &http.Server{
 		Addr:              config.ListenAddress,
 		Handler:           handler,
@@ -69,7 +91,7 @@ func run(arguments []string) error {
 	}()
 
 	logger := log.New(os.Stderr, "acmemux: ", log.LstdFlags)
-	logger.Printf("listening on http://%s", listener.Addr())
+	logger.Printf("listening on %s for public origin %s", listener.Addr(), config.PublicOrigin)
 
 	stopContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

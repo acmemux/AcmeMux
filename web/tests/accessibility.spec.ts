@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { mockSession, mockSessionFailure } from "./support/session";
+
 const desktopViewport = { width: 1440, height: 1000 };
 
 async function expectNoWcagViolations(page: Page) {
@@ -12,6 +14,10 @@ async function expectNoWcagViolations(page: Page) {
 }
 
 test.describe("application accessibility", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockSession(page);
+  });
+
   test("default desktop shell has no WCAG A or AA violations", async ({
     page,
   }) => {
@@ -168,5 +174,47 @@ test.describe("application accessibility", () => {
     });
     expect(timing.animationDuration).toBeLessThanOrEqual(0.00001);
     expect(timing.transitionDuration).toBeLessThanOrEqual(0.00001);
+  });
+});
+
+test.describe("authentication accessibility", () => {
+  for (const state of ["signed_out", "uninitialized", "expired"] as const) {
+    test(`${state} state has no WCAG A or AA violations`, async ({ page }) => {
+      await page.setViewportSize(desktopViewport);
+      await mockSession(page, state);
+      await page.goto("/");
+
+      await expect(page.getByRole("main")).toBeVisible();
+      await expectNoWcagViolations(page);
+    });
+  }
+
+  test("request-blocked state has no WCAG A or AA violations", async ({
+    page,
+  }) => {
+    await page.setViewportSize(desktopViewport);
+    await mockSessionFailure(page, 403, "request_not_allowed");
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", {
+        name: "AcmeMux rejected this browser request",
+      }),
+    ).toBeVisible();
+    await expectNoWcagViolations(page);
+  });
+
+  test("sign-in remains usable at a narrow viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await mockSession(page, "signed_out");
+    await page.goto("/");
+
+    await expect(page.getByLabel("Administrator password")).toBeVisible();
+    const widths = await page.evaluate(() => ({
+      client: document.documentElement.clientWidth,
+      scroll: document.documentElement.scrollWidth,
+    }));
+    expect(widths.scroll).toBeLessThanOrEqual(widths.client);
+    await expectNoWcagViolations(page);
   });
 });

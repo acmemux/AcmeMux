@@ -64,11 +64,6 @@
   text-transform: uppercase;
 }
 
-.am-foundation-state {
-  flex: 1 1 14rem;
-  padding: 0 var(--am-space-5);
-}
-
 .am-scope {
   flex: 0 1 auto;
   padding: 0 var(--am-space-6);
@@ -76,6 +71,35 @@
   font-family: var(--am-font-mono);
   font-size: 0.7rem;
   text-transform: uppercase;
+}
+
+.am-session-controls {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+  gap: var(--am-space-5);
+  padding: var(--am-space-3) var(--am-space-5);
+}
+
+.am-session-controls .am-button {
+  flex: 0 0 auto;
+}
+
+.am-session-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--am-space-3);
+  padding: var(--am-space-3) var(--am-space-5);
+  color: var(--am-color-red);
+  background: var(--am-color-red-wash);
+  border-bottom: 1px solid var(--am-color-red);
+  font-size: var(--am-text-sm);
+}
+
+.am-session-notice span {
+  color: var(--am-color-text);
 }
 
 .am-shell__frame {
@@ -353,6 +377,10 @@
     display: none;
   }
 
+  .am-session-controls {
+    gap: var(--am-space-3);
+  }
+
   .am-shell__frame {
     grid-template-columns: 1fr;
   }
@@ -402,8 +430,12 @@
     border-right: 0;
   }
 
-  .am-foundation-state {
+  .am-session-controls .am-status {
     display: none;
+  }
+
+  .am-session-controls {
+    padding-left: 0;
   }
 
   .am-main {
