@@ -1,0 +1,172 @@
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test, type Page } from "@playwright/test";
+
+const desktopViewport = { width: 1440, height: 1000 };
+
+async function expectNoWcagViolations(page: Page) {
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa"])
+    .analyze();
+
+  expect(results.violations).toEqual([]);
+}
+
+test.describe("application accessibility", () => {
+  test("default desktop shell has no WCAG A or AA violations", async ({
+    page,
+  }) => {
+    await page.setViewportSize(desktopViewport);
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", {
+        name: "Certificate operations",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Primary navigation" }),
+    ).toBeVisible();
+
+    await expectNoWcagViolations(page);
+  });
+
+  test("component catalog has no WCAG A or AA violations", async ({ page }) => {
+    await page.setViewportSize(desktopViewport);
+    await page.goto("/?catalog=components");
+
+    await expect(
+      page.getByRole("heading", { name: "Component catalog", exact: true }),
+    ).toBeVisible();
+
+    await expectNoWcagViolations(page);
+
+    await page
+      .getByRole("button", { name: "Review confirmation", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expectNoWcagViolations(page);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+  });
+
+  test("narrow shell and catalog preserve landmarks without document overflow", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    for (const route of ["/", "/?catalog=components"]) {
+      await page.goto(route);
+
+      await expect(page.getByRole("main")).toBeVisible();
+      await expect(
+        page.getByRole("navigation", { name: "Primary navigation" }),
+      ).toBeVisible();
+
+      const widths = await page.evaluate(() => ({
+        client: document.documentElement.clientWidth,
+        scroll: document.documentElement.scrollWidth,
+      }));
+
+      expect(widths.scroll, route).toBeLessThanOrEqual(widths.client);
+    }
+  });
+
+  test("first meaningful action has a visible keyboard focus indicator", async ({
+    page,
+  }) => {
+    await page.setViewportSize(desktopViewport);
+    await page.goto("/");
+
+    const firstAction = page.getByRole("link", {
+      name: "View component catalog",
+      exact: true,
+    });
+    await expect(firstAction).toBeVisible();
+
+    await firstAction.focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Shift+Tab");
+
+    await expect(firstAction).toBeFocused();
+    const focusIndicator = await firstAction.evaluate((element) => {
+      const styles = window.getComputedStyle(element);
+      return {
+        boxShadow: styles.boxShadow,
+        focusVisible: element.matches(":focus-visible"),
+        outlineStyle: styles.outlineStyle,
+        outlineWidth: Number.parseFloat(styles.outlineWidth),
+      };
+    });
+
+    expect(focusIndicator.focusVisible).toBe(true);
+    expect(
+      (focusIndicator.outlineStyle !== "none" &&
+        focusIndicator.outlineWidth > 0) ||
+        focusIndicator.boxShadow !== "none",
+    ).toBe(true);
+  });
+
+  test("two-hundred-percent text remains readable without document overflow", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/");
+    await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+
+    await expect(
+      page.getByRole("heading", { name: "Certificate operations" }),
+    ).toBeVisible();
+    const layout = await page.evaluate(() => {
+      const client = document.documentElement.clientWidth;
+      const overflow = Array.from(document.querySelectorAll("*"))
+        .map((element) => {
+          const bounds = element.getBoundingClientRect();
+          const styles = window.getComputedStyle(element);
+          return {
+            clientWidth: element.clientWidth,
+            element: `${element.tagName.toLowerCase()}.${element.className}`,
+            left: Math.round(bounds.left),
+            overflowX: styles.overflowX,
+            right: Math.round(bounds.right),
+            scrollWidth: element.scrollWidth,
+          };
+        })
+        .filter(
+          (element) =>
+            element.right > client + 1 ||
+            element.left < -1 ||
+            (element.scrollWidth > element.clientWidth + 1 &&
+              element.overflowX === "visible"),
+        )
+        .slice(0, 20);
+      return {
+        client,
+        overflow,
+        scroll: document.documentElement.scrollWidth,
+      };
+    });
+    expect(layout.scroll, JSON.stringify(layout.overflow)).toBeLessThanOrEqual(
+      layout.client,
+    );
+  });
+
+  test("reduced-motion preference removes meaningful animation", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/?catalog=components");
+
+    const pendingButton = page.getByRole("button", { name: /Saving/ });
+    const spinner = pendingButton.locator(".am-spinner");
+    await expect(spinner).toBeVisible();
+    const timing = await spinner.evaluate((element) => {
+      const styles = window.getComputedStyle(element);
+      return {
+        animationDuration: Number.parseFloat(styles.animationDuration),
+        transitionDuration: Number.parseFloat(styles.transitionDuration),
+      };
+    });
+    expect(timing.animationDuration).toBeLessThanOrEqual(0.00001);
+    expect(timing.transitionDuration).toBeLessThanOrEqual(0.00001);
+  });
+});

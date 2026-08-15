@@ -1,0 +1,92 @@
+import type { ReactNode } from "react";
+
+import { BrandMark } from "../components/BrandMark";
+import { StatusBadge } from "../components/StatusBadge";
+
+const navigation = [
+  { label: "Overview", state: "current" },
+  { label: "Certificates", state: "planned" },
+  { label: "Configuration", state: "planned" },
+  { label: "Operations", state: "planned" },
+  { label: "Workspace", state: "planned" },
+  { label: "Settings", state: "planned" },
+] as const;
+
+export function AppShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="am-shell">
+      <a className="am-skip-link" href="#main-content">
+        Skip to main content
+      </a>
+      <header className="am-topbar">
+        <a className="am-brand" href="/" aria-label="AcmeMux overview">
+          <BrandMark />
+          <span>
+            <strong>AcmeMux</strong>
+            <small>Native lego control plane</small>
+          </span>
+        </a>
+        <div className="am-foundation-state" role="status">
+          <StatusBadge tone="info">Application foundation</StatusBadge>
+        </div>
+        <span className="am-scope">Single administrator / one workspace</span>
+      </header>
+
+      <div className="am-shell__frame">
+        <aside className="am-sidebar">
+          <nav aria-label="Primary navigation">
+            <p className="am-kicker">Control surfaces</p>
+            <ul className="am-navigation">
+              {navigation.map((item, index) => (
+                <li key={item.label}>
+                  {item.state === "current" ? (
+                    <a href="/" aria-current="page">
+                      <span aria-hidden="true">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <strong>{item.label}</strong>
+                    </a>
+                  ) : (
+                    <span className="is-planned" aria-disabled="true">
+                      <span aria-hidden="true">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <strong>{item.label}</strong>
+                      <small>Planned</small>
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          <section className="am-system-signal" aria-labelledby="system-signal">
+            <p className="am-kicker" id="system-signal">
+              System signal
+            </p>
+            <dl>
+              <div>
+                <dt>Runtime</dt>
+                <dd>Not connected</dd>
+              </div>
+              <div>
+                <dt>Workspace</dt>
+                <dd>Not adopted</dd>
+              </div>
+              <div>
+                <dt>Managed operation</dt>
+                <dd>Unavailable</dd>
+              </div>
+            </dl>
+          </section>
+
+          <p className="am-ownership-note">
+            Native configuration, accounts, certificates, and private keys
+            remain in the upstream lego workspace.
+          </p>
+        </aside>
+        {children}
+      </div>
+    </div>
+  );
+}

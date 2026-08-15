@@ -1,0 +1,91 @@
+@import "./tokens.css";
+@import "./components.css";
+@import "./shell.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 20rem;
+  color: var(--am-color-text);
+  background: var(--am-color-canvas);
+  font-family: var(--am-font-sans);
+  font-size: 100%;
+  line-height: 1.55;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-width: 20rem;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+h1,
+h2,
+h3,
+p,
+dl,
+dd {
+  margin-top: 0;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--am-color-text);
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+h2 {
+  font-size: var(--am-text-xl);
+  letter-spacing: -0.025em;
+}
+
+h3 {
+  font-size: var(--am-text-md);
+}
+
+::selection {
+  color: var(--am-color-canvas);
+  background: var(--am-color-cyan);
+}
+
+:focus-visible {
+  outline: 3px solid var(--am-color-focus);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px var(--am-color-cyan);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid CanvasText;
+    box-shadow: none;
+  }
+}

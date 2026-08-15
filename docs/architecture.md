@@ -24,3 +24,9 @@ belong in application state.
 
 The browser is a same-origin client. Node.js is used only to build and verify
 it; no Node.js runtime is part of the production topology.
+
+The browser shell is composed from authored tokens and semantic components.
+React Aria supplies headless interaction behavior, while the application owns
+all visual styling and repository-authored SVG. The in-application component
+catalog and Playwright visual and accessibility suites are shared contracts for
+later feature screens; see `visual-system.md`.

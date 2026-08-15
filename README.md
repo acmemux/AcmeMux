@@ -48,4 +48,6 @@ embedded browser application at `/`. The default listener is
 See [docs/architecture.md](docs/architecture.md),
 [docs/development.md](docs/development.md), and
 [docs/dependencies.md](docs/dependencies.md) for the current application
-boundaries and contributor workflow.
+boundaries and contributor workflow. The accepted visual and component rules
+are documented in [docs/visual-system.md](docs/visual-system.md); run
+`make catalog` to inspect the isolated component catalog.

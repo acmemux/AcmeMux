@@ -1,0 +1,54 @@
+:root {
+  color-scheme: dark;
+
+  --am-color-canvas: #071015;
+  --am-color-canvas-raised: #0a151b;
+  --am-color-surface: #0d1b22;
+  --am-color-surface-raised: #12242c;
+  --am-color-line: #2a414b;
+  --am-color-line-strong: #49636d;
+  --am-color-text: #f2f7f7;
+  --am-color-text-muted: #a5b7bc;
+  --am-color-text-faint: #7f969d;
+  --am-color-cyan: #73e0e3;
+  --am-color-cyan-strong: #b7f8f6;
+  --am-color-cyan-wash: #102d33;
+  --am-color-amber: #ffc267;
+  --am-color-amber-wash: #382a15;
+  --am-color-green: #77d7a5;
+  --am-color-green-wash: #122e24;
+  --am-color-red: #ff9494;
+  --am-color-red-wash: #3b1d20;
+  --am-color-violet: #c2a9ff;
+  --am-color-violet-wash: #271f3a;
+  --am-color-focus: #ffffff;
+
+  --am-font-sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --am-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --am-text-xs: 0.75rem;
+  --am-text-sm: 0.875rem;
+  --am-text-md: 1rem;
+  --am-text-lg: 1.125rem;
+  --am-text-xl: clamp(1.35rem, 2vw, 1.65rem);
+  --am-text-display: clamp(2.65rem, 6vw, 5.5rem);
+
+  --am-space-1: 0.25rem;
+  --am-space-2: 0.5rem;
+  --am-space-3: 0.75rem;
+  --am-space-4: 1rem;
+  --am-space-5: 1.25rem;
+  --am-space-6: 1.5rem;
+  --am-space-8: 2rem;
+  --am-space-10: 2.5rem;
+  --am-space-12: 3rem;
+  --am-space-16: 4rem;
+
+  --am-radius-sm: 0.25rem;
+  --am-radius-md: 0.5rem;
+  --am-radius-lg: 0.75rem;
+  --am-shadow-raised: 0 1rem 2.5rem rgb(0 0 0 / 28%);
+  --am-motion-fast: 140ms;
+  --am-motion-standard: 220ms;
+}

@@ -6,7 +6,7 @@ GOVULNCHECK_VERSION := v1.7.0
 GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
 
-.PHONY: bootstrap browser-install build format-check lint run test test-browser test-race toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-browser test-race test-visual test-visual-update test-web toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -47,6 +47,21 @@ web-verify:
 
 test-browser:
 	cd web && npm run test:browser
+
+test-web:
+	cd web && npm run test
+
+test-accessibility:
+	cd web && npm run test:accessibility
+
+test-visual:
+	cd web && npm run test:visual
+
+test-visual-update:
+	cd web && npm run test:visual:update
+
+catalog:
+	cd web && npm run catalog
 
 build: web-build
 	mkdir -p dist
