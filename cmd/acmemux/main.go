@@ -1,0 +1,95 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/sgurden-certleap/AcmeMux/internal/appconfig"
+	"github.com/sgurden-certleap/AcmeMux/internal/httpapi"
+	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/sgurden-certleap/AcmeMux/internal/webassets"
+)
+
+const shutdownTimeout = 10 * time.Second
+
+func main() {
+	if err := run(os.Args[1:]); err != nil {
+		log.Printf("acmemux: %v", err)
+		os.Exit(1)
+	}
+}
+
+func run(arguments []string) error {
+	if len(arguments) > 0 && arguments[0] == "serve" {
+		arguments = arguments[1:]
+	}
+	config, err := appconfig.Load(arguments, os.Getenv)
+	if err != nil {
+		return fmt.Errorf("load configuration: %w", err)
+	}
+
+	database, err := state.Open(config.StateDirectory)
+	if err != nil {
+		return fmt.Errorf("open application state: %w", err)
+	}
+	defer database.Close()
+
+	assets, err := webassets.FS()
+	if err != nil {
+		return fmt.Errorf("open embedded browser assets: %w", err)
+	}
+
+	handler := httpapi.New(database, assets)
+	server := &http.Server{
+		Addr:              config.ListenAddress,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	listener, err := net.Listen("tcp", config.ListenAddress)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", config.ListenAddress, err)
+	}
+	defer listener.Close()
+
+	serveErrors := make(chan error, 1)
+	go func() {
+		serveErrors <- server.Serve(listener)
+	}()
+
+	logger := log.New(os.Stderr, "acmemux: ", log.LstdFlags)
+	logger.Printf("listening on http://%s", listener.Addr())
+
+	stopContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case err = <-serveErrors:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return fmt.Errorf("serve HTTP: %w", err)
+	case <-stopContext.Done():
+	}
+
+	shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := server.Shutdown(shutdownContext); err != nil {
+		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+	if err := <-serveErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("serve HTTP during shutdown: %w", err)
+	}
+	return nil
+}

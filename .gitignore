@@ -1,0 +1,12 @@
+/dist/
+/var/
+/.cache/
+*.db
+*.db-shm
+*.db-wal
+/web/node_modules/
+/web/coverage/
+/web/dist/
+/web/playwright-report/
+/web/test-results/
+*.tsbuildinfo
