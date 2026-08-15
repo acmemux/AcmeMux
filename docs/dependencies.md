@@ -8,6 +8,7 @@ The foundation uses a deliberately small production dependency set.
 | Node.js / npm | 20.19.2 / 9.2.0 | Browser build and test toolchain only | MIT / Artistic-2.0; Debian security-maintained Node.js package and locked npm CLI |
 | modernc.org/sqlite | 1.56.0 | Pure-Go SQLite driver | BSD-3-Clause; current canonical release with active release history |
 | React / React DOM | 19.2.8 | Browser component runtime | MIT; current npm releases |
+| React Aria Components | 1.20.0 | Headless accessible component behavior | Apache-2.0; current Adobe React Spectrum release with React 19 support |
 
 Direct build and verification dependencies are also exact-pinned:
 
@@ -20,6 +21,7 @@ Direct build and verification dependencies are also exact-pinned:
 | ESLint / JavaScript config / TypeScript ESLint / React Hooks / globals | 10.8.1 / 10.0.1 / 8.67.0 / 7.1.1 / 17.11.0 | MIT; active canonical packages |
 | Prettier | 3.9.6 | MIT; current canonical release |
 | Playwright Test | 1.62.1 | Apache-2.0; current canonical release |
+| axe Playwright | 4.13.0 | MPL-2.0; current Deque browser accessibility integration, used only for verification |
 | Staticcheck | 0.7.0 | MIT; current tagged release |
 | govulncheck | 1.7.0 | BSD-3-Clause; current tagged release |
 
@@ -30,3 +32,7 @@ mandatory verification gates.
 
 Dependency changes require review of upstream maintenance, licenses, supported
 toolchains, and vulnerability results before acceptance.
+
+The visual system uses system fonts and repository-authored CSS and SVG. It has
+no external font, icon, image, dashboard-template, or component-workshop asset
+dependency.
