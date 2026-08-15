@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { mockSession } from "./support/session";
+import { mockRuntime } from "./support/runtime";
 
 const fullPageSnapshot = {
   animations: "disabled" as const,
@@ -13,6 +14,7 @@ test.describe("wide visual contract", () => {
 
   test("application shell", async ({ page }) => {
     await mockSession(page);
+    await mockRuntime(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Certificate operations" }),
@@ -70,6 +72,7 @@ test.describe("narrow visual contract", () => {
 
   test("application shell", async ({ page }) => {
     await mockSession(page);
+    await mockRuntime(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Certificate operations" }),

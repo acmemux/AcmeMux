@@ -36,6 +36,8 @@ type AuthView =
 type AuthenticatedSessionContextValue = {
   isSigningOut: boolean;
   signOutError: string | null;
+  endSession(): void;
+  rejectRequest(): void;
   signOut(): Promise<void>;
 };
 
@@ -194,8 +196,18 @@ export function AuthBoundary({
     }
   }
 
+  const endSession = useCallback(() => {
+    setView({ kind: "expired" });
+  }, []);
+
+  const rejectRequest = useCallback(() => {
+    setView({ kind: "requestBlocked" });
+  }, []);
+
   const authenticatedValue: AuthenticatedSessionContextValue = {
+    endSession,
     isSigningOut,
+    rejectRequest,
     signOut,
     signOutError,
   };

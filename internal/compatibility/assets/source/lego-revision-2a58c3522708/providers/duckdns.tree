@@ -1,0 +1,6 @@
+100644 blob c69c1d91bdc29f71d4ac5df2007265c3ded0dfd4	docs/content/dns/zz_gen_duckdns.md
+100644 blob 8c78fa9443fdde3d2e1de615e78bff26df15877c	providers/dns/duckdns/duckdns.go
+100644 blob b2034fd48ffd051113d92e3ecbda806f57931950	providers/dns/duckdns/duckdns.toml
+100644 blob bcef6b91e82f52e55ebe6a0cb3a6e115b7a522a2	providers/dns/duckdns/duckdns_test.go
+100644 blob 03da96c66461df7ce655bc65824033e90ce73b6b	providers/dns/duckdns/internal/client.go
+100644 blob cdba78d7ae72e98940978efaa7755f66fda04c6a	providers/dns/duckdns/internal/client_test.go

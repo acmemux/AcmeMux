@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 
 import { browserSessionClient, type SessionClient } from "./api/session";
+import { browserRuntimeClient, type RuntimeClient } from "./api/runtime";
 import { AuthBoundary } from "./auth/AuthBoundary";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteLoading } from "./components/RouteLoading";
@@ -10,8 +11,10 @@ const ComponentCatalog = lazy(() => import("./app/ComponentCatalog"));
 
 export function App({
   sessionClient = browserSessionClient,
+  runtimeClient = browserRuntimeClient,
 }: {
   sessionClient?: SessionClient;
+  runtimeClient?: RuntimeClient;
 } = {}) {
   const showCatalog =
     import.meta.env.DEV &&
@@ -32,7 +35,7 @@ export function App({
   return (
     <ErrorBoundary>
       <AuthBoundary client={sessionClient}>
-        <OverviewPage />
+        <OverviewPage runtimeClient={runtimeClient} />
       </AuthBoundary>
     </ErrorBoundary>
   );

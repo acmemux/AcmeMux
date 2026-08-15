@@ -17,9 +17,11 @@ const navigation = [
 export function AppShell({
   children,
   isCatalog = false,
+  runtimeStatus = "Not connected",
 }: {
   children: ReactNode;
   isCatalog?: boolean;
+  runtimeStatus?: string;
 }) {
   const session = useOptionalAuthenticatedSession();
   if (!isCatalog && !session) {
@@ -106,7 +108,7 @@ export function AppShell({
             <dl>
               <div>
                 <dt>Runtime</dt>
-                <dd>Not connected</dd>
+                <dd>{runtimeStatus}</dd>
               </div>
               <div>
                 <dt>Workspace</dt>

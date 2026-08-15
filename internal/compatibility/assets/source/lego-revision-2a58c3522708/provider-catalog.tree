@@ -1,0 +1,3 @@
+100644 blob 42a1d9c7a1850a4377af6a5e180620ff02963355	cmd/cmd_dnshelp.go
+100644 blob c19baf6320c61593d1224a8ee11dee3288144c95	cmd/zz_gen_cmd_dnshelp.go
+100644 blob 55d90c893ae82a64d5bdc03de9fb3182d9a719dd	providers/dns/zz_gen_dns_providers.go

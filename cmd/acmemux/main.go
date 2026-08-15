@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/sgurden-certleap/AcmeMux/internal/appconfig"
+	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
 	"github.com/sgurden-certleap/AcmeMux/internal/httpapi"
 	"github.com/sgurden-certleap/AcmeMux/internal/identity"
+	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
 	"github.com/sgurden-certleap/AcmeMux/internal/state"
 	"github.com/sgurden-certleap/AcmeMux/internal/webassets"
 )
@@ -43,6 +45,9 @@ func run(arguments []string) error {
 }
 
 func runServer(arguments []string) error {
+	if err := requireUnprivilegedServiceProcess(); err != nil {
+		return err
+	}
 	config, err := appconfig.Load(arguments, os.Getenv)
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
@@ -57,27 +62,34 @@ func runServer(arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize administrator identity: %w", err)
 	}
+	runtimePolicy := acmeruntime.DefaultProbePolicy()
+	runtimePolicy.TrustedSHA256 = compatibility.QualifiedExecutableSHA256s()
+	runtimeInspector, err := acmeruntime.NewInspector(runtimePolicy)
+	if err != nil {
+		return fmt.Errorf("initialize runtime inspector: %w", err)
+	}
+	runtimeSelections, err := acmeruntime.NewSelectionStore(database)
+	if err != nil {
+		return fmt.Errorf("initialize runtime selection store: %w", err)
+	}
 
 	assets, err := webassets.FS()
 	if err != nil {
 		return fmt.Errorf("open embedded browser assets: %w", err)
 	}
 
-	handler, err := httpapi.New(database, identityService, assets, httpapi.SecurityConfig{
+	handler, err := httpapi.New(database, identityService, httpapi.RuntimeDependencies{
+		Inspector:  runtimeInspector,
+		Selections: runtimeSelections,
+		Classify:   compatibility.Classify,
+	}, assets, httpapi.SecurityConfig{
 		PublicOrigin:   config.PublicOrigin,
 		TrustedProxies: config.TrustedProxies,
 	})
 	if err != nil {
 		return fmt.Errorf("configure HTTP security: %w", err)
 	}
-	server := &http.Server{
-		Addr:              config.ListenAddress,
-		Handler:           handler,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
+	server := newApplicationHTTPServer(config.ListenAddress, handler)
 
 	listener, err := net.Listen("tcp", config.ListenAddress)
 	if err != nil {
@@ -114,4 +126,17 @@ func runServer(arguments []string) error {
 		return fmt.Errorf("serve HTTP during shutdown: %w", err)
 	}
 	return nil
+}
+
+func newApplicationHTTPServer(address string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              address,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		// Runtime inspection has a 30-second production deadline. This budget
+		// leaves time for authentication, decoding, and its timeout response.
+		WriteTimeout: 45 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
 }

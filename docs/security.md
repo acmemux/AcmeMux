@@ -94,6 +94,45 @@ API requests require the configured Host, while local health and readiness
 probes remain minimal and unauthenticated. Unknown `/api/` routes return JSON
 errors and never fall through to the browser application.
 
+## Upstream executable trust
+
+Only an authenticated administrator can inspect or adopt a `lego` executable.
+Inspection accepts one absolute canonical path and follows no symbolic links.
+The retained file must be a nonempty regular executable owned by root or the
+service identity, no larger than 512 MiB, free of special mode bits, and not
+writable by group or others. File capabilities are rejected except exact
+`cap_net_bind_service=ep`. The service itself refuses to start with any real,
+effective, saved, or filesystem root user or group identity, supplementary
+group 0, mismatched process identities, or any inheritable, permitted,
+effective, or ambient Linux capability.
+
+The dedicated service identity is part of the host trust boundary. A different
+local process running under that same identity can mutate a service-owned inode
+even while AcmeMux retains an open descriptor. Operators should not share the
+service account with unrelated processes and should prefer a root-owned,
+non-writable `lego` executable when practical.
+
+AcmeMux hashes the retained file before execution and runs `--version` only
+when the bytes match an independently qualified, executed artifact digest. The
+probe uses a fixed environment and no shell; bounded embedded build evidence
+must match the exact manifest. The administrator explicitly reviews path,
+times, ownership, mode, capability, binary and dependency digests, exact
+output, version or commit, platform, build provenance, and manifest. A stable
+review fingerprint binds all displayed evidence to adoption, and the session
+and CSRF pair are revalidated immediately before persistence.
+
+The selected executable is re-opened and compared with all reviewed evidence.
+A changed path, inode, owner, mode, capability, time, size, digest, output,
+build identity, version, or platform blocks managed use until the replacement
+is inspected and adopted. Operation preparation loads the validated persisted
+singleton, requires the current compatibility result to retain the exact
+reviewed manifest, and owns the retained descriptor through a one-shot child
+start so concurrent close or descriptor reuse cannot redirect execution. The runtime flow
+never downloads, upgrades, registers with an ACME server, accesses a provider,
+or performs certificate work. See
+`runtime-compatibility.md` for supported identities and host-permission
+troubleshooting.
+
 ## Failed sign-in and recovery
 
 Wrong passwords and an uninitialized service use the same credential failure

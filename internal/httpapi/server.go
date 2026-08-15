@@ -23,6 +23,7 @@ type Readiness interface {
 func New(
 	readiness Readiness,
 	identityService *identity.Service,
+	runtimeDependencies RuntimeDependencies,
 	assets fs.FS,
 	config SecurityConfig,
 ) (http.Handler, error) {
@@ -31,6 +32,10 @@ func New(
 		return nil, err
 	}
 	identityAPI, err := newIdentityEndpoints(identityService, requestBoundary.trustedProxies)
+	if err != nil {
+		return nil, err
+	}
+	runtimeAPI, err := newRuntimeEndpoints(identityAPI, runtimeDependencies)
 	if err != nil {
 		return nil, err
 	}
@@ -48,6 +53,7 @@ func New(
 		writeJSON(response, http.StatusOK, map[string]string{"status": "ready"})
 	})
 	identityAPI.register(multiplexer)
+	runtimeAPI.register(multiplexer)
 	multiplexer.HandleFunc("/api", apiNotFound)
 	multiplexer.HandleFunc("/api/", apiNotFound)
 	multiplexer.Handle("/", browserHandler(assets))

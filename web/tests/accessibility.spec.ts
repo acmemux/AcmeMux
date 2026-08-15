@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { mockSession, mockSessionFailure } from "./support/session";
+import { mockRuntime, supportedCandidate } from "./support/runtime";
 
 const desktopViewport = { width: 1440, height: 1000 };
 
@@ -16,6 +17,7 @@ async function expectNoWcagViolations(page: Page) {
 test.describe("application accessibility", () => {
   test.beforeEach(async ({ page }) => {
     await mockSession(page);
+    await mockRuntime(page);
   });
 
   test("default desktop shell has no WCAG A or AA violations", async ({
@@ -174,6 +176,37 @@ test.describe("application accessibility", () => {
     });
     expect(timing.animationDuration).toBeLessThanOrEqual(0.00001);
     expect(timing.transitionDuration).toBeLessThanOrEqual(0.00001);
+  });
+
+  test("runtime evidence review has no WCAG A or AA violations", async ({
+    page,
+  }) => {
+    await page.setViewportSize(desktopViewport);
+    await page.goto("/");
+    await page
+      .getByLabel("Host executable path")
+      .fill(supportedCandidate.candidate.canonicalPath);
+    await page.getByRole("button", { name: "Inspect executable" }).click();
+
+    await expect(
+      page.getByRole("heading", { name: "Review executable evidence" }),
+    ).toBeVisible();
+    await expectNoWcagViolations(page);
+  });
+
+  test("runtime setup remains usable without narrow document overflow", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto("/");
+
+    await expect(page.getByLabel("Host executable path")).toBeVisible();
+    const widths = await page.evaluate(() => ({
+      client: document.documentElement.clientWidth,
+      scroll: document.documentElement.scrollWidth,
+    }));
+    expect(widths.scroll).toBeLessThanOrEqual(widths.client);
+    await expectNoWcagViolations(page);
   });
 });
 
