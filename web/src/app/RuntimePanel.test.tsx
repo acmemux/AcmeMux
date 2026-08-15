@@ -16,6 +16,7 @@ import {
   type RuntimeSnapshot,
 } from "../api/runtime";
 import type { SessionClient } from "../api/session";
+import type { WorkspaceClient } from "../api/workspace";
 import { RuntimePanel, type RuntimeController } from "./RuntimePanel";
 
 const evidence: RuntimeEvidence = {
@@ -58,6 +59,22 @@ const authenticatedSession: SessionClient = {
   signIn: vi.fn(async () => ({ state: "authenticated" as const })),
   signOut: vi.fn(async () => undefined),
 };
+
+const unadoptedWorkspaceClient: WorkspaceClient = {
+  getWorkspace: vi.fn(async () => ({ state: "unadopted" as const })),
+  inspectCandidate: vi.fn(),
+  adoptCandidate: vi.fn(),
+};
+
+function renderApp(runtimeClient: RuntimeClient) {
+  return render(
+    <App
+      runtimeClient={runtimeClient}
+      sessionClient={authenticatedSession}
+      workspaceClient={unadoptedWorkspaceClient}
+    />,
+  );
+}
 
 function clientWith(
   snapshot: RuntimeSnapshot,
@@ -107,7 +124,7 @@ describe("runtime selection", () => {
 
   it("requires review of exact evidence before adopting a supported candidate", async () => {
     const client = clientWith({ state: "unselected" });
-    render(<App runtimeClient={client} sessionClient={authenticatedSession} />);
+    renderApp(client);
 
     await inspectPath("/usr/local/bin/lego");
 
@@ -178,6 +195,7 @@ describe("runtime selection", () => {
           : candidate.path,
       pathError: null,
       phase: "idle",
+      requestRevision: 1,
       refresh: vi.fn(async () => undefined),
       setPath: vi.fn(),
       snapshot: null,
@@ -232,7 +250,7 @@ describe("runtime selection", () => {
         },
       },
     );
-    render(<App runtimeClient={client} sessionClient={authenticatedSession} />);
+    renderApp(client);
 
     await inspectPath("/usr/local/bin/lego");
 
@@ -261,7 +279,7 @@ describe("runtime selection", () => {
         },
       },
     );
-    render(<App runtimeClient={client} sessionClient={authenticatedSession} />);
+    renderApp(client);
 
     await inspectPath("/usr/local/bin/lego");
 
@@ -279,7 +297,7 @@ describe("runtime selection", () => {
     });
     const client = clientWith({ state: "unselected" });
     client.inspectCandidate = vi.fn(() => pending);
-    render(<App runtimeClient={client} sessionClient={authenticatedSession} />);
+    renderApp(client);
 
     await inspectPath("/usr/local/bin/lego");
 
@@ -300,7 +318,7 @@ describe("runtime selection", () => {
 
   it("validates an explicit absolute path without making a request", async () => {
     const client = clientWith({ state: "unselected" });
-    render(<App runtimeClient={client} sessionClient={authenticatedSession} />);
+    renderApp(client);
 
     await inspectPath("usr/local/bin/lego");
 
@@ -326,12 +344,14 @@ describe("runtime selection", () => {
     client.inspectCandidate = vi.fn(async () => {
       throw new RuntimeRequestError("service_unavailable", 503);
     });
-    render(<App runtimeClient={client} sessionClient={authenticatedSession} />);
+    renderApp(client);
 
     expect(
       await screen.findByText("Runtime ready for workspace adoption"),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Inspect executable" }));
+    const inspect = screen.getByRole("button", { name: "Inspect executable" });
+    await waitFor(() => expect(inspect).toBeEnabled());
+    fireEvent.click(inspect);
 
     expect(await screen.findByText("Runtime unavailable")).toBeInTheDocument();
     expect(
@@ -377,9 +397,7 @@ describe("runtime selection", () => {
         path: "/usr/local/bin/lego",
         diagnostic: { code, message: "Safe backend diagnostic" },
       });
-      render(
-        <App runtimeClient={client} sessionClient={authenticatedSession} />,
-      );
+      renderApp(client);
 
       expect(await screen.findByText(new RegExp(message))).toBeInTheDocument();
       expect(
@@ -398,7 +416,7 @@ describe("runtime selection", () => {
       },
       runtime: evidence,
     });
-    render(<App runtimeClient={client} sessionClient={authenticatedSession} />);
+    renderApp(client);
 
     const disclosure = await screen.findByText(
       "Show previously reviewed runtime evidence",
@@ -420,12 +438,7 @@ describe("runtime selection", () => {
       inspectCandidate: vi.fn(),
       adoptCandidate: vi.fn(),
     };
-    render(
-      <App
-        runtimeClient={runtimeClient}
-        sessionClient={authenticatedSession}
-      />,
-    );
+    renderApp(runtimeClient);
 
     expect(
       await screen.findByRole("heading", { name: "Administrator sign in" }),

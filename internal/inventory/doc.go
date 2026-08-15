@@ -1,3 +1,4 @@
-// Package inventory derives bounded certificate observations from native lego
-// evidence. Inventory behavior is introduced by its dedicated delivery task.
+// Package inventory derives bounded certificate observations from an adopted
+// native lego storage directory. It never reads or returns certificate,
+// resource, account, or private-key contents itself.
 package inventory

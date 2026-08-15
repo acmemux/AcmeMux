@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -16,9 +17,11 @@ import (
 	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
 	"github.com/sgurden-certleap/AcmeMux/internal/httpapi"
 	"github.com/sgurden-certleap/AcmeMux/internal/identity"
+	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
 	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
 	"github.com/sgurden-certleap/AcmeMux/internal/state"
 	"github.com/sgurden-certleap/AcmeMux/internal/webassets"
+	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -72,6 +75,22 @@ func runServer(arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize runtime selection store: %w", err)
 	}
+	workspaceInspector, err := workspace.NewInspector(workspace.DefaultPolicy())
+	if err != nil {
+		return fmt.Errorf("initialize workspace inspector: %w", err)
+	}
+	workspaceSelections, err := workspace.NewStore(database)
+	if err != nil {
+		return fmt.Errorf("initialize workspace selection store: %w", err)
+	}
+	inventoryDirectory, err := prepareInventoryDirectory(config.StateDirectory)
+	if err != nil {
+		return fmt.Errorf("prepare private inventory directory: %w", err)
+	}
+	inventoryReader, err := inventory.NewReader(inventory.DefaultPolicy(inventoryDirectory))
+	if err != nil {
+		return fmt.Errorf("initialize certificate inventory: %w", err)
+	}
 
 	assets, err := webassets.FS()
 	if err != nil {
@@ -82,6 +101,16 @@ func runServer(arguments []string) error {
 		Inspector:  runtimeInspector,
 		Selections: runtimeSelections,
 		Classify:   compatibility.Classify,
+	}, httpapi.WorkspaceDependencies{
+		Inspector:  workspaceInspector,
+		Selections: workspaceSelections,
+		Inventory:  inventoryReader,
+		PrepareRuntime: func(ctx context.Context) (inventory.PreparedExecutable, error) {
+			return runtimeInspector.PrepareCurrent(ctx, runtimeSelections, func(observation acmeruntime.Observation) (string, bool) {
+				result := compatibility.Classify(observation)
+				return string(result.ManifestID), result.Compatible()
+			})
+		},
 	}, assets, httpapi.SecurityConfig{
 		PublicOrigin:   config.PublicOrigin,
 		TrustedProxies: config.TrustedProxies,
@@ -134,9 +163,28 @@ func newApplicationHTTPServer(address string, handler http.Handler) *http.Server
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		// Runtime inspection has a 30-second production deadline. This budget
-		// leaves time for authentication, decoding, and its timeout response.
-		WriteTimeout: 45 * time.Second,
+		// A workspace response can include one 30-second runtime recheck and one
+		// 20-second inventory command. This leaves a response margin after both
+		// bounded native phases and request authentication.
+		WriteTimeout: 75 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+}
+
+func prepareInventoryDirectory(stateDirectory string) (string, error) {
+	directory := filepath.Join(stateDirectory, "inventory-cwd")
+	if err := os.Mkdir(directory, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return "", err
+	}
+	info, err := os.Lstat(directory)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", errors.New("private inventory path must be a directory, not a symbolic link")
+	}
+	if err := os.Chmod(directory, 0o700); err != nil {
+		return "", err
+	}
+	return directory, nil
 }

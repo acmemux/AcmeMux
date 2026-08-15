@@ -1,21 +1,133 @@
 import { AppShell } from "./AppShell";
-import { browserRuntimeClient, type RuntimeClient } from "../api/runtime";
+import {
+  browserRuntimeClient,
+  type RuntimeCandidate,
+  type RuntimeClient,
+  type RuntimeSnapshot,
+} from "../api/runtime";
+import {
+  browserWorkspaceClient,
+  type WorkspaceCandidate,
+  type WorkspaceClient,
+  type WorkspaceSnapshot,
+} from "../api/workspace";
 import { StatusBadge } from "../components/StatusBadge";
 import {
   RuntimePanel,
   runtimeSignal,
   useRuntimeController,
 } from "./RuntimePanel";
+import {
+  WorkspacePanel,
+  useWorkspaceController,
+  workspaceSignal,
+} from "./WorkspacePanel";
+
+function decodedEvidenceMatches(left: unknown, right: unknown): boolean {
+  // Both values have already crossed strict decoders that construct fields in
+  // one canonical order, so this compares every review-visible field.
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function runtimeCandidateInvalidatesCurrent(
+  snapshot: RuntimeSnapshot | null,
+  candidate: RuntimeCandidate | null,
+): boolean {
+  if (snapshot?.state !== "supported" || candidate === null) {
+    return false;
+  }
+  const candidatePath =
+    candidate.state === "review_required"
+      ? candidate.candidate.canonicalPath
+      : candidate.path;
+  if (candidatePath !== snapshot.runtime.canonicalPath) {
+    return false;
+  }
+  return (
+    candidate.state !== "review_required" ||
+    candidate.compatibility.state !== snapshot.compatibility.state ||
+    candidate.compatibility.code !== snapshot.compatibility.code ||
+    candidate.compatibility.manifestId !== snapshot.compatibility.manifestId ||
+    !decodedEvidenceMatches(candidate.candidate, snapshot.runtime)
+  );
+}
+
+function workspaceCandidateInvalidatesCurrent(
+  snapshot: WorkspaceSnapshot | null,
+  candidate: WorkspaceCandidate | null,
+): boolean {
+  if (snapshot?.state !== "ready" || candidate === null) {
+    return false;
+  }
+  const sameSelection =
+    candidate.candidate.workingDirectory.canonicalPath ===
+      snapshot.workspace.workingDirectory.canonicalPath &&
+    candidate.candidate.configuration.path.canonicalPath ===
+      snapshot.workspace.configuration.path.canonicalPath;
+  return (
+    sameSelection &&
+    (!candidate.adoptable ||
+      !decodedEvidenceMatches(candidate.candidate, snapshot.workspace))
+  );
+}
 
 export function OverviewPage({
   runtimeClient = browserRuntimeClient,
+  workspaceClient = browserWorkspaceClient,
 }: {
   runtimeClient?: RuntimeClient;
+  workspaceClient?: WorkspaceClient;
 } = {}) {
   const runtime = useRuntimeController(runtimeClient);
-  const signal = runtimeSignal(runtime);
-  const runtimeReady =
-    runtime.snapshot?.state === "supported" && runtime.error === null;
+  const runtimeCandidateInvalidates = runtimeCandidateInvalidatesCurrent(
+    runtime.snapshot,
+    runtime.candidate,
+  );
+  const runtimeSnapshotReady =
+    runtime.phase === "idle" &&
+    runtime.snapshot?.state === "supported" &&
+    !runtimeCandidateInvalidates &&
+    runtime.error === null;
+  const workspaceActivationKey =
+    runtime.snapshot !== null && runtime.error === null
+      ? `${runtime.requestRevision}:${runtime.snapshot.state}`
+      : null;
+  const runtimeInteractionsEnabled =
+    runtime.phase === "idle" && runtime.error === null;
+  const workspace = useWorkspaceController(
+    workspaceClient,
+    workspaceActivationKey,
+    runtimeSnapshotReady,
+    runtimeInteractionsEnabled,
+  );
+  const workspaceBlocksRuntime = workspace.runtimeRecheckRequired;
+  const runtimeReady = runtimeSnapshotReady && !workspaceBlocksRuntime;
+  const signal = workspaceBlocksRuntime
+    ? "Recheck required"
+    : runtimeSignal(runtime);
+  const nativeSignal =
+    !runtimeReady && workspace.snapshot?.state === "ready"
+      ? "Recheck required"
+      : workspaceSignal(workspace);
+  const workspaceCandidateInvalidates = workspaceCandidateInvalidatesCurrent(
+    workspace.snapshot,
+    workspace.candidate,
+  );
+  const workspaceReady =
+    runtimeReady &&
+    workspace.phase === "idle" &&
+    workspace.snapshot?.state === "ready" &&
+    !workspaceCandidateInvalidates &&
+    workspace.error === null;
+  const showWorkspace =
+    runtimeReady ||
+    workspace.phase === "loading" ||
+    workspace.error !== null ||
+    (workspace.snapshot !== null && workspace.snapshot.state !== "unadopted");
+  const inventoryCount =
+    workspaceReady && workspace.snapshot?.state === "ready"
+      ? workspace.snapshot.inventory.length
+      : null;
   const foundations = [
     {
       label: "Runtime trust",
@@ -26,13 +138,22 @@ export function OverviewPage({
     },
     {
       label: "Native workspace",
-      state: "Not adopted",
-      detail: "No configuration or certificate evidence is connected.",
+      state: nativeSignal,
+      detail: workspaceReady
+        ? "Reviewed native paths remain authoritative and unchanged."
+        : "Managed operations wait for safe workspace adoption.",
     },
     {
       label: "Certificate inventory",
-      state: "Unavailable",
-      detail: "Inventory appears only after safe workspace adoption.",
+      state:
+        inventoryCount === null
+          ? "Unavailable"
+          : inventoryCount === 1
+            ? "1 certificate"
+            : `${inventoryCount.toLocaleString("en-US")} certificates`,
+      detail: workspaceReady
+        ? "Bounded upstream evidence from native storage."
+        : "Inventory appears only after safe workspace adoption.",
     },
     {
       label: "Automatic evaluation",
@@ -61,20 +182,33 @@ export function OverviewPage({
           ) : null}
         </header>
 
-        <RuntimePanel controller={runtime} />
+        <RuntimePanel
+          controller={runtime}
+          externallyBusy={workspace.phase !== "idle"}
+          trustBlocked={workspaceBlocksRuntime}
+        />
+        {showWorkspace ? (
+          <WorkspacePanel
+            controller={workspace}
+            interactionsEnabled={runtimeInteractionsEnabled}
+            runtimeReady={runtimeReady}
+          />
+        ) : null}
 
         <section className="am-readiness" aria-labelledby="readiness-heading">
           <div className="am-section-heading">
             <div>
               <p className="am-kicker">Current state</p>
               <h2 id="readiness-heading">
-                {runtimeReady
-                  ? "Runtime ready for workspace adoption"
-                  : "Managed operations remain blocked"}
+                {workspaceReady
+                  ? "Native workspace connected"
+                  : runtimeReady
+                    ? "Runtime ready for workspace adoption"
+                    : "Managed operations remain blocked"}
               </h2>
             </div>
-            <StatusBadge tone={runtimeReady ? "success" : "not-attempted"}>
-              {runtimeReady ? "Runtime trusted" : "Setup incomplete"}
+            <StatusBadge tone={workspaceReady ? "success" : "not-attempted"}>
+              {workspaceReady ? "Workspace trusted" : "Setup incomplete"}
             </StatusBadge>
           </div>
           <div className="am-readiness__grid">
@@ -136,7 +270,7 @@ export function OverviewPage({
                 </div>
                 <div>
                   <dt>Native paths</dt>
-                  <dd>None selected</dd>
+                  <dd>{nativeSignal}</dd>
                 </div>
               </dl>
             </details>

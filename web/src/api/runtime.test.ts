@@ -119,6 +119,67 @@ describe("runtime client", () => {
     expect(headers.get("Content-Type")).toBe("application/json");
   });
 
+  it("treats a missing mutation CSRF cookie as an expired session", async () => {
+    const request = vi.fn<FetchImplementation>();
+    const client = createRuntimeClient({
+      fetch: request,
+      readCookies: () => "",
+    });
+
+    await expect(
+      client.inspectCandidate("/usr/local/bin/lego"),
+    ).rejects.toMatchObject({
+      code: "authentication_required",
+      status: 401,
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mutation response for a different executable path", async () => {
+    const otherEvidence = {
+      ...evidence,
+      canonicalPath: "/opt/lego/bin/lego",
+    };
+    const candidateClient = createRuntimeClient({
+      fetch: vi.fn(async () =>
+        jsonResponse({
+          state: "review_required",
+          candidate: otherEvidence,
+          compatibility: {
+            state: "supported",
+            code: "compatible",
+            manifestId: "lego-v5.3.1",
+            summary: "Exact release and platform match.",
+          },
+          reviewedEvidenceSha256: "b".repeat(64),
+        }),
+      ),
+      readCookies: () => "__Host-acmemux_csrf=csrf-token",
+    });
+    await expect(
+      candidateClient.inspectCandidate(evidence.canonicalPath),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+
+    const adoptionClient = createRuntimeClient({
+      fetch: vi.fn(async () =>
+        jsonResponse({
+          state: "supported",
+          runtime: otherEvidence,
+          compatibility: {
+            state: "supported",
+            code: "compatible",
+            manifestId: "lego-v5.3.1",
+            summary: "Exact release and platform match.",
+          },
+        }),
+      ),
+      readCookies: () => "__Host-acmemux_csrf=csrf-token",
+    });
+    await expect(
+      adoptionClient.adoptCandidate(evidence, "lego-v5.3.1", "b".repeat(64)),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
   it("binds adoption to the reviewed canonical path, digest, and manifest", async () => {
     const request = vi.fn<FetchImplementation>(async () =>
       jsonResponse({
@@ -238,11 +299,192 @@ describe("runtime client", () => {
         },
       },
       {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          build: { ...evidence.build, goVersion: "go1.26.é" },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "Non-ASCII embedded build evidence.",
+        },
+      },
+      {
         state: "unsafe",
         path: "/usr/local/bin/lego",
         diagnostic: {
           code: "path_unavailable",
           message: "State and diagnostic disagree.",
+        },
+      },
+      {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: {
+            ...evidence.metadata,
+            modifiedAt: "2024-02-31T00:00:00Z",
+          },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "Impossible timestamp.",
+        },
+      },
+      {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: {
+            ...evidence.metadata,
+            changedAt: "2030-01-01T00:00:00+00:00",
+          },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "Noncanonical timestamp.",
+        },
+      },
+      {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: { ...evidence.metadata, changedAt: "0000-01-01T00:00:00Z" },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "Year zero.",
+        },
+      },
+      {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: {
+            ...evidence.metadata,
+            changedAt: "2030-01-01T00:00:00.100Z",
+          },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "Noncanonical fractional timestamp.",
+        },
+      },
+      {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: { ...evidence.metadata, mode: "755" },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "Malformed mode.",
+        },
+      },
+      {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: { ...evidence.metadata, sizeBytes: 0 },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "Empty executable.",
+        },
+      },
+      {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: { ...evidence.metadata, sizeBytes: 512 * 1024 * 1024 + 1 },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "Oversized executable.",
+        },
+      },
+      ...["0775", "4755", "2755", "1755", "0644"].map((mode) => ({
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: { ...evidence.metadata, mode },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "Unsafe executable mode.",
+        },
+      })),
+      {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: { ...evidence.metadata, uid: 0x1_0000_0000 },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "UID outside uint32.",
+        },
+      },
+      {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: { ...evidence.metadata, gid: 0x1_0000_0000 },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "GID outside uint32.",
+        },
+      },
+      {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: {
+            ...evidence.metadata,
+            device: "18446744073709551616",
+          },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "Device outside uint64.",
+        },
+      },
+      {
+        state: "supported",
+        runtime: {
+          ...evidence,
+          metadata: { ...evidence.metadata, inode: "0123456" },
+        },
+        compatibility: {
+          state: "supported",
+          code: "compatible",
+          manifestId: "lego-v5.3.1",
+          summary: "Noncanonical inode.",
         },
       },
     ];
@@ -255,6 +497,42 @@ describe("runtime client", () => {
         code: "invalid_response",
       });
     }
+  });
+
+  it("accepts exact runtime metadata wire boundaries", async () => {
+    const boundaryEvidence: RuntimeEvidence = {
+      ...evidence,
+      metadata: {
+        ...evidence.metadata,
+        modifiedAt: "2024-02-29T23:59:59.123456789Z",
+        changedAt: "2030-01-01T00:00:00Z",
+        sizeBytes: 512 * 1024 * 1024,
+        mode: "0755",
+        uid: 0xffff_ffff,
+        gid: 0xffff_ffff,
+        device: "18446744073709551615",
+        inode: "18446744073709551615",
+      },
+    };
+    const client = createRuntimeClient({
+      fetch: vi.fn(async () =>
+        jsonResponse({
+          state: "supported",
+          runtime: boundaryEvidence,
+          compatibility: {
+            state: "supported",
+            code: "compatible",
+            manifestId: "lego-v5.3.1",
+            summary: "Exact boundary metadata.",
+          },
+        }),
+      ),
+    });
+
+    await expect(client.getRuntime()).resolves.toMatchObject({
+      state: "supported",
+      runtime: boundaryEvidence,
+    });
   });
 
   it("rejects non-JSON responses and maps replacement races without reflecting bodies", async () => {
@@ -291,4 +569,49 @@ describe("runtime client", () => {
     expect(error).toMatchObject({ code: "runtime_changed", status: 409 });
     expect(String(error)).not.toContain("secret-bearing");
   });
+
+  it.each([
+    {
+      status: 401,
+      bodyCode: "service_unavailable",
+      expected: "authentication_required",
+    },
+    {
+      status: 403,
+      bodyCode: "authentication_required",
+      expected: "request_not_allowed",
+    },
+    {
+      status: 421,
+      bodyCode: "runtime_changed",
+      expected: "request_not_allowed",
+    },
+    {
+      status: 503,
+      bodyCode: "authentication_required",
+      expected: "service_unavailable",
+    },
+    {
+      status: 400,
+      bodyCode: "request_not_allowed",
+      expected: "invalid_request",
+    },
+  ])(
+    "keeps HTTP $status authoritative over protected body code $bodyCode",
+    async ({ status, bodyCode, expected }) => {
+      const client = createRuntimeClient({
+        fetch: vi.fn(async () =>
+          jsonResponse(
+            { error: { code: bodyCode, message: "Mismatched error." } },
+            { status },
+          ),
+        ),
+      });
+
+      await expect(client.getRuntime()).rejects.toMatchObject({
+        code: expected,
+        status,
+      });
+    },
+  );
 });

@@ -133,6 +133,43 @@ or performs certificate work. See
 `runtime-compatibility.md` for supported identities and host-permission
 troubleshooting.
 
+## Native workspace and inventory trust
+
+Only an authenticated administrator can inspect or adopt a workspace. Every
+request names an absolute canonical effective working directory and either an
+explicit native YAML path or conventional `.lego.yml`-before-`.lego.yaml`
+discovery. Storage, DNS dotenv, and HTTP webroot references are resolved from
+the effective working directory, matching native `lego` behavior even when an
+explicit YAML file lives elsewhere.
+
+AcmeMux opens every selected path component without following symbolic links.
+It requires trusted ownership, safe types and modes, the exact service access
+needed by each role, single-link confidential YAML and dotenv files, and
+writable replacement parents where later atomic edits require them. The
+bounded browser review exposes stable component identity and permission
+evidence plus final-object link and timestamp metadata. A fingerprint binds
+that displayed evidence; external changes block later access until reviewed.
+AcmeMux never repairs, relocates, changes ownership, or changes permissions on
+the native workspace.
+
+Certificate inventory first revalidates the exact persisted runtime and
+workspace. It starts the retained executable directly, without a shell, using
+the fixed `certificates list --path <absolute-storage> --json` argument vector,
+a private configuration-free working directory, an allowlisted environment,
+and bounded time, output, process-group, tree, count, and one-at-a-time limits.
+Native JSON resource and certificate paths must reconcile with no-follow
+filesystem evidence, and the full workspace is rechecked after inventory,
+before metadata reaches the browser. A stable storage that has not created its
+`certificates` directory yet is reported as empty only for the exact upstream
+missing-directory failure record; the directory is not created automatically.
+
+Workspace adoption revalidates the session and original CSRF pair immediately
+before saving. SQLite stores only reviewed paths, non-content filesystem
+observations, fingerprints, and times. It does not store native YAML or dotenv
+contents, certificate resource JSON, certificate or chain bytes, private keys,
+account material, child stderr, or inventory results. See
+`workspace-adoption.md` for layouts, permissions, states, and limits.
+
 ## Failed sign-in and recovery
 
 Wrong passwords and an uninitialized service use the same credential failure

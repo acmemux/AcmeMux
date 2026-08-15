@@ -234,6 +234,11 @@ const diagnosticCodes = new Set<RuntimeDiagnosticCode>([
   "executable_replaced",
 ]);
 const manifestIdPattern = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+const modePattern = /^[0-7]{4}$/;
+const numericIdentifierPattern = /^(?:0|[1-9][0-9]{0,19})$/;
+const maximumUint32 = 0xffff_ffff;
+const maximumUint64 = 0xffff_ffff_ffff_ffffn;
+const maximumExecutableSize = 512 * 1024 * 1024;
 const knownErrorCodes = new Set<RuntimeErrorCode>([
   "authentication_required",
   "request_not_allowed",
@@ -283,16 +288,112 @@ function boundedString(value: unknown, maximum = 4096): value is string {
   );
 }
 
+function containsControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 0x20 || codePoint === 0x7f;
+  });
+}
+
+function boundedDisplayText(value: unknown, maximum: number): value is string {
+  return (
+    typeof value === "string" &&
+    boundedString(value, maximum) &&
+    !containsControlCharacter(value)
+  );
+}
+
+function boundedPrintableASCII(
+  value: unknown,
+  maximum: number,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maximum &&
+    Array.from(value).every((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint >= 0x20 && codePoint <= 0x7e;
+    })
+  );
+}
+
 function safeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function uint32(value: unknown): value is number {
+  return safeInteger(value) && value <= maximumUint32;
+}
+
+function uint64Identifier(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    numericIdentifierPattern.test(value) &&
+    BigInt(value) <= maximumUint64
+  );
+}
+
+function validTimestamp(value: unknown): value is string {
+  if (!boundedString(value, 64)) {
+    return false;
+  }
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$/.exec(
+      value,
+    );
+  if (!match) {
+    return false;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const fractional = match[7];
+  const leapYear = year % 400 === 0 || (year % 4 === 0 && year % 100 !== 0);
+  const daysInMonth = [
+    31,
+    leapYear ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return (
+    year >= 1 &&
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= (daysInMonth[month - 1] ?? 0) &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59 &&
+    (fractional === undefined || !fractional.endsWith("0"))
+  );
+}
+
+function validExecutableMode(value: unknown): value is string {
+  if (typeof value !== "string" || !modePattern.test(value)) {
+    return false;
+  }
+  const mode = Number.parseInt(value, 8);
+  return (mode & 0o7022) === 0 && (mode & 0o111) !== 0;
 }
 
 function decodePlatform(value: unknown): RuntimeEvidence["platform"] {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ["os", "architecture"]) ||
-    !boundedString(value.os, 64) ||
-    !boundedString(value.architecture, 64)
+    !boundedDisplayText(value.os, 64) ||
+    !boundedDisplayText(value.architecture, 64)
   ) {
     throw new RuntimeRequestError("invalid_response", 0);
   }
@@ -314,15 +415,17 @@ function decodeMetadata(value: unknown): RuntimeEvidence["metadata"] {
       "inode",
     ]) ||
     !safeInteger(value.sizeBytes) ||
-    !boundedString(value.modifiedAt, 64) ||
-    !boundedString(value.changedAt, 64) ||
-    !boundedString(value.mode, 32) ||
+    value.sizeBytes === 0 ||
+    value.sizeBytes > maximumExecutableSize ||
+    !validTimestamp(value.modifiedAt) ||
+    !validTimestamp(value.changedAt) ||
+    !validExecutableMode(value.mode) ||
     (value.capabilities !== "none" &&
       value.capabilities !== "cap_net_bind_service=ep") ||
-    !safeInteger(value.uid) ||
-    !safeInteger(value.gid) ||
-    !boundedString(value.device, 64) ||
-    !boundedString(value.inode, 64)
+    !uint32(value.uid) ||
+    !uint32(value.gid) ||
+    !uint64Identifier(value.device) ||
+    !uint64Identifier(value.inode)
   ) {
     throw new RuntimeRequestError("invalid_response", 0);
   }
@@ -359,14 +462,14 @@ function decodeBuild(value: unknown): RuntimeEvidence["build"] {
     ]) ||
     typeof value.available !== "boolean" ||
     typeof value.provenanceComplete !== "boolean" ||
-    !boundedString(value.goVersion, 128) ||
-    !boundedString(value.commandPath, 256) ||
-    !boundedString(value.mainPath, 256) ||
-    !boundedString(value.mainVersion, 256) ||
+    !boundedPrintableASCII(value.goVersion, 128) ||
+    !boundedPrintableASCII(value.commandPath, 256) ||
+    !boundedPrintableASCII(value.mainPath, 256) ||
+    !boundedPrintableASCII(value.mainVersion, 256) ||
     typeof value.dependencyGraphSha256 !== "string" ||
     !/^[a-f0-9]{64}$/.test(value.dependencyGraphSha256) ||
-    !boundedString(value.goos, 32) ||
-    !boundedString(value.goarch, 32) ||
+    !boundedPrintableASCII(value.goos, 32) ||
+    !boundedPrintableASCII(value.goarch, 32) ||
     typeof value.vcsRevision !== "string" ||
     !/^[a-f0-9]{40}$/.test(value.vcsRevision) ||
     typeof value.vcsModifiedKnown !== "boolean" ||
@@ -443,8 +546,11 @@ function decodeEvidence(value: unknown): RuntimeEvidence {
     !build.provenanceComplete ||
     build.commandPath !== "github.com/go-acme/lego/v5" ||
     build.mainPath !== "github.com/go-acme/lego/v5" ||
+    platform.os !== "linux" ||
+    (platform.architecture !== "amd64" && platform.architecture !== "arm64") ||
     build.goos !== platform.os ||
     build.goarch !== platform.architecture ||
+    (value.commit !== null && build.vcsRevision !== value.commit) ||
     !build.vcsModifiedKnown ||
     !build.vcsModifiedValid ||
     build.vcsModified
@@ -470,7 +576,7 @@ function decodeCompatibility(value: unknown): RuntimeCompatibility {
     typeof value.state !== "string" ||
     !selectedStates.has(value.state as CompatibilityState) ||
     !compatibilityCodes.has(value.code as RuntimeCompatibilityCode) ||
-    !boundedString(value.summary, 1024) ||
+    !boundedDisplayText(value.summary, 1024) ||
     (value.manifestId !== undefined &&
       (typeof value.manifestId !== "string" ||
         !manifestIdPattern.test(value.manifestId))) ||
@@ -498,7 +604,7 @@ function decodeDiagnostic(
     !isRecord(value) ||
     !hasExactKeys(value, ["code", "message"]) ||
     !diagnosticCodes.has(value.code as RuntimeDiagnosticCode) ||
-    !boundedString(value.message, 1024)
+    !boundedDisplayText(value.message, 1024)
   ) {
     throw new RuntimeRequestError("invalid_response", 0);
   }
@@ -558,6 +664,11 @@ function decodeSnapshot(value: unknown): RuntimeSnapshot {
     ) {
       throw new RuntimeRequestError("invalid_response", 0);
     }
+    const runtime =
+      value.runtime === undefined ? undefined : decodeEvidence(value.runtime);
+    if (runtime !== undefined && runtime.canonicalPath !== value.path) {
+      throw new RuntimeRequestError("invalid_response", 0);
+    }
     return {
       state: value.state as RuntimeDiagnosticState,
       path: value.path,
@@ -565,9 +676,7 @@ function decodeSnapshot(value: unknown): RuntimeSnapshot {
         value.diagnostic,
         value.state as RuntimeDiagnosticState,
       ),
-      ...(value.runtime === undefined
-        ? {}
-        : { runtime: decodeEvidence(value.runtime) }),
+      ...(runtime === undefined ? {} : { runtime }),
     };
   }
   throw new RuntimeRequestError("invalid_response", 0);
@@ -627,6 +736,29 @@ function decodeCandidate(value: unknown): RuntimeCandidate {
   throw new RuntimeRequestError("invalid_response", 0);
 }
 
+function candidatePath(candidate: RuntimeCandidate): string {
+  return candidate.state === "review_required"
+    ? candidate.candidate.canonicalPath
+    : candidate.path;
+}
+
+function snapshotPath(snapshot: RuntimeSnapshot): string | null {
+  switch (snapshot.state) {
+    case "unselected":
+      return null;
+    case "supported":
+    case "unverified":
+    case "incompatible":
+      return snapshot.runtime.canonicalPath;
+    case "missing":
+    case "unsafe":
+    case "changed":
+    case "malformed_output":
+    case "timed_out":
+      return snapshot.path;
+  }
+}
+
 function isJSONContentType(value: string): boolean {
   return value.split(";", 1)[0]?.trim().toLowerCase() === "application/json";
 }
@@ -679,6 +811,12 @@ function fallbackCode(status: number): RuntimeErrorCode {
 }
 
 async function responseError(response: Response): Promise<RuntimeRequestError> {
+  if (response.status === 401) {
+    return new RuntimeRequestError("authentication_required", 401);
+  }
+  if (response.status === 403 || response.status === 421) {
+    return new RuntimeRequestError("request_not_allowed", response.status);
+  }
   let code = fallbackCode(response.status);
   if (isJSONContentType(response.headers.get("content-type") ?? "")) {
     try {
@@ -692,7 +830,13 @@ async function responseError(response: Response): Promise<RuntimeRequestError> {
         boundedString(value.error.message, 1024) &&
         knownErrorCodes.has(value.error.code as RuntimeErrorCode)
       ) {
-        code = value.error.code as RuntimeErrorCode;
+        const presented = value.error.code as RuntimeErrorCode;
+        if (
+          presented !== "authentication_required" &&
+          presented !== "request_not_allowed"
+        ) {
+          code = presented;
+        }
       }
     } catch {
       // Error bodies are deliberately neither retained nor rendered.
@@ -711,8 +855,18 @@ export function runtimePathError(path: string): string | undefined {
   if (!path.startsWith("/")) {
     return "Enter an absolute Linux host path beginning with /.";
   }
-  if (/[\0\r\n]/.test(path)) {
-    return "The path cannot contain line breaks or null characters.";
+  if (containsControlCharacter(path)) {
+    return "The path cannot contain control characters.";
+  }
+  const components = path.slice(1).split("/");
+  if (
+    path === "/" ||
+    components.some(
+      (component) =>
+        component === "" || component === "." || component === "..",
+    )
+  ) {
+    return "Enter a canonical absolute path without repeated separators, dot components, or a trailing slash.";
   }
   return undefined;
 }
@@ -744,7 +898,7 @@ export function createRuntimeClient(
     if (mutation) {
       const csrf = readCookie(CSRF_COOKIE_NAME, readCookies());
       if (!csrf) {
-        throw new RuntimeRequestError("invalid_response", 0);
+        throw new RuntimeRequestError("authentication_required", 401);
       }
       headers.set(CSRF_HEADER_NAME, csrf);
       headers.set("Content-Type", "application/json");
@@ -773,13 +927,17 @@ export function createRuntimeClient(
     },
     async inspectCandidate(path: string) {
       validatePath(path);
-      return decodeCandidate(
+      const candidate = decodeCandidate(
         await send(
           "/api/v1/runtime/candidates",
           { body: JSON.stringify({ path }), method: "POST" },
           true,
         ),
       );
+      if (candidatePath(candidate) !== path) {
+        throw new RuntimeRequestError("invalid_response", 0);
+      }
+      return candidate;
     },
     async adoptCandidate(
       candidate: RuntimeEvidence,
@@ -793,7 +951,7 @@ export function createRuntimeClient(
       ) {
         throw new RuntimeRequestError("invalid_request", 0);
       }
-      return decodeSnapshot(
+      const snapshot = decodeSnapshot(
         await send(
           "/api/v1/runtime",
           {
@@ -808,6 +966,10 @@ export function createRuntimeClient(
           true,
         ),
       );
+      if (snapshotPath(snapshot) !== candidate.canonicalPath) {
+        throw new RuntimeRequestError("invalid_response", 0);
+      }
+      return snapshot;
     },
   };
 }

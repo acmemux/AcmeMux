@@ -83,6 +83,20 @@ describe("session client", () => {
     });
   });
 
+  it("treats a missing sign-out CSRF cookie as an expired session", async () => {
+    const request = vi.fn<FetchImplementation>();
+    const client = createSessionClient({
+      fetch: request,
+      readCookies: () => "",
+    });
+
+    await expect(client.signOut()).rejects.toMatchObject({
+      code: "authentication_required",
+      status: 401,
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("does not retain or reflect an authentication error body", async () => {
     const request = vi.fn(async () =>
       jsonResponse(
@@ -147,4 +161,44 @@ describe("session client", () => {
       status: 421,
     });
   });
+
+  it.each([
+    {
+      status: 401,
+      bodyCode: "service_unavailable",
+      expected: "authentication_required",
+    },
+    {
+      status: 403,
+      bodyCode: "session_expired",
+      expected: "request_not_allowed",
+    },
+    {
+      status: 421,
+      bodyCode: "authentication_required",
+      expected: "request_not_allowed",
+    },
+    {
+      status: 503,
+      bodyCode: "authentication_required",
+      expected: "service_unavailable",
+    },
+  ])(
+    "keeps HTTP $status authoritative over session body code $bodyCode",
+    async ({ status, bodyCode, expected }) => {
+      const client = createSessionClient({
+        fetch: vi.fn(async () =>
+          jsonResponse(
+            { error: { code: bodyCode, message: "Mismatched error." } },
+            { status },
+          ),
+        ),
+      });
+
+      await expect(client.getSession()).rejects.toMatchObject({
+        code: expected,
+        status,
+      });
+    },
+  );
 });

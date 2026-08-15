@@ -119,6 +119,7 @@ func newRuntimeHTTPHarness(t *testing.T) *runtimeHTTPHarness {
 			},
 			Now: func() time.Time { return time.Date(2030, 2, 3, 4, 5, 6, 7, time.UTC) },
 		},
+		testWorkspaceDependencies(),
 		fstest.MapFS{"index.html": {Data: []byte("browser")}},
 		SecurityConfig{PublicOrigin: identityTestOrigin},
 	)
@@ -505,6 +506,7 @@ func TestNewRejectsIncompleteRuntimeDependencies(t *testing.T) {
 				readinessStub{},
 				sharedTestIdentity(t),
 				test.dependencies,
+				testWorkspaceDependencies(),
 				fstest.MapFS{},
 				SecurityConfig{PublicOrigin: testPublicOrigin},
 			)

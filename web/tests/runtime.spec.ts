@@ -6,9 +6,11 @@ import {
   runtimeEvidence,
   supportedCandidate,
 } from "./support/runtime";
+import { mockWorkspace } from "./support/workspace";
 
 test.beforeEach(async ({ page }) => {
   await mockSession(page);
+  await mockWorkspace(page);
 });
 
 test("reviews exact executable evidence before adoption", async ({ page }) => {

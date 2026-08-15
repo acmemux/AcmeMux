@@ -14,6 +14,13 @@ import {
   type SessionSnapshot,
 } from "./api/session";
 import type { RuntimeClient, RuntimeSnapshot } from "./api/runtime";
+import type { WorkspaceClient } from "./api/workspace";
+
+const unadoptedWorkspaceClient: WorkspaceClient = {
+  getWorkspace: vi.fn(async () => ({ state: "unadopted" as const })),
+  inspectCandidate: vi.fn(),
+  adoptCandidate: vi.fn(),
+};
 
 function clientWith(
   session: SessionSnapshot,
@@ -81,6 +88,7 @@ describe("App authentication boundary", () => {
       <App
         runtimeClient={runtimeClientWith()}
         sessionClient={clientWith({ state: "authenticated" })}
+        workspaceClient={unadoptedWorkspaceClient}
       />,
     );
 
@@ -226,6 +234,7 @@ describe("App authentication boundary", () => {
       <App
         runtimeClient={runtimeClientWith()}
         sessionClient={clientWith({ state: "authenticated" }, { signOut })}
+        workspaceClient={unadoptedWorkspaceClient}
       />,
     );
 

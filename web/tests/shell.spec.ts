@@ -2,10 +2,12 @@ import { expect, test } from "@playwright/test";
 
 import { mockSession } from "./support/session";
 import { mockRuntime } from "./support/runtime";
+import { mockWorkspace } from "./support/workspace";
 
 test.beforeEach(async ({ page }) => {
   await mockSession(page);
   await mockRuntime(page);
+  await mockWorkspace(page);
 });
 
 test("renders an honest application shell", async ({ page }) => {

@@ -42,8 +42,8 @@ func TestOpenCreatesRestrictiveMigratedState(t *testing.T) {
 	if err := database.connection.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&migrationsApplied); err != nil {
 		t.Fatalf("query migration ledger: %v", err)
 	}
-	if migrationsApplied != 4 {
-		t.Fatalf("migration count = %d, want 4", migrationsApplied)
+	if migrationsApplied != 5 {
+		t.Fatalf("migration count = %d, want 5", migrationsApplied)
 	}
 	for _, prohibited := range []string{"credential", "certificate", "private_key", "native_config", "account_material"} {
 		var count int
@@ -53,6 +53,79 @@ func TestOpenCreatesRestrictiveMigratedState(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("schema unexpectedly contains %q", prohibited)
 		}
+	}
+}
+
+func TestWorkspaceMigrationCreatesBoundedRelationalEvidenceSchema(t *testing.T) {
+	t.Parallel()
+
+	database, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	for _, table := range []string{
+		"workspace_selection",
+		"workspace_path_observation",
+		"workspace_component_observation",
+		"workspace_review_diagnostic",
+	} {
+		var definition string
+		if err := database.connection.QueryRow(
+			"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", table,
+		).Scan(&definition); err != nil {
+			t.Fatalf("inspect %s schema: %v", table, err)
+		}
+		columns, err := database.connection.Query("PRAGMA table_info(" + table + ")")
+		if err != nil {
+			t.Fatalf("inspect %s columns: %v", table, err)
+		}
+		for columns.Next() {
+			var (
+				columnID     int
+				name         string
+				columnType   string
+				notNull      int
+				defaultValue sql.NullString
+				primaryKey   int
+			)
+			if err := columns.Scan(&columnID, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+				columns.Close()
+				t.Fatalf("read %s columns: %v", table, err)
+			}
+			for _, prohibited := range []string{"yaml", "secret", "content", "certificate", "private_key"} {
+				if strings.Contains(strings.ToLower(name), prohibited) {
+					columns.Close()
+					t.Fatalf("%s schema contains prohibited content field %q", table, name)
+				}
+			}
+			if table == "workspace_component_observation" && name == "nlink_decimal" {
+				columns.Close()
+				t.Fatal("volatile component link counts must not be persisted")
+			}
+		}
+		if err := columns.Err(); err != nil {
+			columns.Close()
+			t.Fatalf("read %s columns: %v", table, err)
+		}
+		columns.Close()
+	}
+
+	var foreignKeys int
+	rows, err := database.connection.Query("PRAGMA foreign_key_list(workspace_component_observation)")
+	if err != nil {
+		t.Fatalf("inspect workspace component foreign keys: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		foreignKeys++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read workspace component foreign keys: %v", err)
+	}
+	if foreignKeys != 2 {
+		t.Fatalf("workspace component foreign-key columns = %d, want 2", foreignKeys)
 	}
 }
 

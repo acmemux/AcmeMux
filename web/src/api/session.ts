@@ -166,7 +166,16 @@ function fallbackCode(status: number): SessionErrorCode {
   }
 }
 
-async function responseError(response: Response): Promise<SessionRequestError> {
+async function responseError(
+  response: Response,
+  allowInvalidCredentials = false,
+): Promise<SessionRequestError> {
+  if (response.status === 403 || response.status === 421) {
+    return new SessionRequestError("request_not_allowed", response.status);
+  }
+  if (response.status === 401 && !allowInvalidCredentials) {
+    return new SessionRequestError("authentication_required", 401);
+  }
   let code = fallbackCode(response.status);
   const contentType = response.headers.get("content-type") ?? "";
   if (isJSONContentType(contentType)) {
@@ -178,7 +187,21 @@ async function responseError(response: Response): Promise<SessionRequestError> {
         typeof body.error.code === "string" &&
         knownErrorCodes.has(body.error.code as SessionErrorCode)
       ) {
-        code = body.error.code as SessionErrorCode;
+        const presented = body.error.code as SessionErrorCode;
+        if (
+          allowInvalidCredentials &&
+          response.status === 401 &&
+          presented === "invalid_credentials"
+        ) {
+          code = presented;
+        } else if (
+          presented !== "invalid_credentials" &&
+          presented !== "authentication_required" &&
+          presented !== "session_expired" &&
+          presented !== "request_not_allowed"
+        ) {
+          code = presented;
+        }
       }
     } catch {
       // The response body is deliberately not retained or reflected.
@@ -211,7 +234,7 @@ export function createSessionClient(
       throw new SessionRequestError("network_failure", 0);
     }
     if (!response.ok) {
-      throw await responseError(response);
+      throw await responseError(response, init.method === "POST");
     }
 
     return decodeSession(await readJSON(response));
@@ -237,7 +260,7 @@ export function createSessionClient(
     async signOut() {
       const csrfToken = readCookie(CSRF_COOKIE_NAME, readCookies());
       if (!csrfToken) {
-        throw new SessionRequestError("invalid_response", 0);
+        throw new SessionRequestError("authentication_required", 401);
       }
       let response: Response;
       try {
