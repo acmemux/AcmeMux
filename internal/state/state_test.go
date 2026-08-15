@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,8 +42,8 @@ func TestOpenCreatesRestrictiveMigratedState(t *testing.T) {
 	if err := database.connection.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&migrationsApplied); err != nil {
 		t.Fatalf("query migration ledger: %v", err)
 	}
-	if migrationsApplied != 2 {
-		t.Fatalf("migration count = %d, want 2", migrationsApplied)
+	if migrationsApplied != 4 {
+		t.Fatalf("migration count = %d, want 4", migrationsApplied)
 	}
 	for _, prohibited := range []string{"credential", "certificate", "private_key", "native_config", "account_material"} {
 		var count int
@@ -52,6 +53,123 @@ func TestOpenCreatesRestrictiveMigratedState(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("schema unexpectedly contains %q", prohibited)
 		}
+	}
+}
+
+func TestRuntimeReviewContinuityMigrationInvalidatesLegacySelection(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	createLegacyRuntimeState(t, directory)
+
+	database, err := Open(directory)
+	if err != nil {
+		t.Fatalf("Open(upgrade) error = %v", err)
+	}
+	defer database.Close()
+
+	var selections int
+	if err := database.connection.QueryRow("SELECT COUNT(*) FROM runtime_selection").Scan(&selections); err != nil {
+		t.Fatalf("count migrated runtime selections: %v", err)
+	}
+	if selections != 0 {
+		t.Fatalf("migrated runtime selection count = %d, want 0", selections)
+	}
+
+	wantColumns := map[string]bool{
+		"capabilities":                  false,
+		"build_provenance_complete":     false,
+		"build_command_path":            false,
+		"build_dependency_graph_sha256": false,
+	}
+	rows, err := database.connection.Query("PRAGMA table_info(runtime_selection)")
+	if err != nil {
+		t.Fatalf("inspect migrated runtime schema: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			columnID     int
+			name         string
+			columnType   string
+			notNull      int
+			defaultValue sql.NullString
+			primaryKey   int
+		)
+		if err := rows.Scan(&columnID, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatalf("read migrated runtime schema: %v", err)
+		}
+		if _, tracked := wantColumns[name]; tracked {
+			if notNull != 1 {
+				t.Fatalf("runtime_selection.%s NOT NULL = %d, want 1", name, notNull)
+			}
+			wantColumns[name] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("inspect migrated runtime schema: %v", err)
+	}
+	for name, found := range wantColumns {
+		if !found {
+			t.Fatalf("runtime_selection.%s was not added by migration", name)
+		}
+	}
+}
+
+func createLegacyRuntimeState(t *testing.T, directory string) {
+	t.Helper()
+
+	connection, err := sql.Open("sqlite", filepath.Join(directory, databaseFilename))
+	if err != nil {
+		t.Fatalf("open legacy SQLite fixture: %v", err)
+	}
+	if _, err := connection.Exec(`CREATE TABLE schema_migrations (
+version TEXT PRIMARY KEY,
+applied_at TEXT NOT NULL
+)`); err != nil {
+		connection.Close()
+		t.Fatalf("create legacy migration ledger: %v", err)
+	}
+	for _, name := range []string{"001_foundation.sql", "002_identity.sql", "003_runtime.sql"} {
+		contents, err := migrations.ReadFile(filepath.Join("migrations", name))
+		if err != nil {
+			connection.Close()
+			t.Fatalf("read legacy migration %s: %v", name, err)
+		}
+		if _, err := connection.Exec(string(contents)); err != nil {
+			connection.Close()
+			t.Fatalf("apply legacy migration %s: %v", name, err)
+		}
+		if _, err := connection.Exec(
+			"INSERT INTO schema_migrations (version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
+			name,
+		); err != nil {
+			connection.Close()
+			t.Fatalf("record legacy migration %s: %v", name, err)
+		}
+	}
+	if _, err := connection.Exec(`INSERT INTO runtime_selection (
+    singleton_id, canonical_path, device_decimal, inode_decimal, mode, uid, gid,
+    size_bytes, modified_at_utc, changed_at_utc, sha256, version_kind, version_value,
+    platform_os, platform_arch, build_available, build_go_version, build_main_path,
+    build_main_version, build_goos, build_goarch, build_vcs_revision,
+    build_vcs_modified_known, build_vcs_modified_valid, build_vcs_modified,
+    version_output, observed_at_utc, compatibility_manifest_id, reviewed_at_utc
+) VALUES (
+    1, '/usr/local/bin/lego', '1', '2', 33261, 0, 0,
+    1, '2026-08-15T00:00:00Z', '2026-08-15T00:00:00Z',
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'release', 'v5.3.1', 'linux', 'amd64', 1, 'go1.26.5',
+    'github.com/go-acme/lego/v5', 'v5.3.1', 'linux', 'amd64',
+    '589c84af4f26629fbdaa7fbca712f806632ccb7e', 1, 1, 0,
+    'lego version 5.3.1 linux/amd64', '2026-08-15T00:00:00Z',
+    'lego-v5.3.1', '2026-08-15T00:00:00Z'
+)`); err != nil {
+		connection.Close()
+		t.Fatalf("insert legacy runtime selection: %v", err)
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatalf("close legacy SQLite fixture: %v", err)
 	}
 }
 

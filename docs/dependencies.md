@@ -8,6 +8,7 @@ The foundation uses a deliberately small production dependency set.
 | Node.js / npm | 20.19.2 / 9.2.0 | Browser build and test toolchain only | MIT / Artistic-2.0; Debian security-maintained Node.js package and locked npm CLI |
 | modernc.org/sqlite | 1.56.0 | Pure-Go SQLite driver | BSD-3-Clause; current canonical release with active release history |
 | golang.org/x/crypto | 0.55.0 | Argon2id password verification | BSD-3-Clause; current Go cryptography subrepository release maintained by the Go project |
+| golang.org/x/sys | 0.47.0 | Linux file-capability inspection at the executable trust boundary | BSD-3-Clause; current Go system-interface subrepository release maintained by the Go project |
 | golang.org/x/term | 0.45.0 | No-echo local administrator password input | BSD-3-Clause; current Go terminal subrepository release maintained by the Go project |
 | React / React DOM | 19.2.8 | Browser component runtime | MIT; current npm releases |
 | React Aria Components | 1.20.0 | Headless accessible component behavior | Apache-2.0; current Adobe React Spectrum release with React 19 support |
@@ -38,3 +39,8 @@ toolchains, and vulnerability results before acceptance.
 The visual system uses system fonts and repository-authored CSS and SVG. It has
 no external font, icon, image, dashboard-template, or component-workshop asset
 dependency.
+
+The compatibility package embeds upstream `lego`'s v5.3.1 JSON Schema and full
+MIT license notice as reviewed data assets. AcmeMux does not link or embed the
+`lego` library or executable. Asset provenance and deliberate update checks are
+documented in `runtime-compatibility.md`.

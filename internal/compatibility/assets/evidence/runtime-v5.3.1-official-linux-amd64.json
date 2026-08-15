@@ -1,0 +1,20 @@
+{
+  "manifest_id": "lego-v5.3.1",
+  "fixture_kind": "official_github_release",
+  "official_binary": true,
+  "executed": true,
+  "archive_name": "lego_v5.3.1_linux_amd64.tar.gz",
+  "archive_sha256": "b3c71b122ee1947eacfe0b809b955647f6377239fe4bfc49f73b1a091ae1252a",
+  "published_checksums_sha256": "d069acad0ad28bcfc03a9a94ea127ae78c84e6ba5f3387886033abfb1cd88527",
+  "executable_sha256": "36c97b1ed369c2c46d7a4dde0d635d8e742b080c27c36d58933a8029f7811624",
+  "version_output": "lego version 5.3.1 linux/amd64\n",
+  "go_version": "go1.26.5",
+  "command_path": "github.com/go-acme/lego/v5",
+  "module_path": "github.com/go-acme/lego/v5",
+  "module_version": "v5.3.1",
+  "dependency_graph_sha256": "91e0f94c6d9c66addce234a1f9a4c98fdef8f6fc8ca6efbd441fa665569a550b",
+  "goos": "linux",
+  "goarch": "amd64",
+  "vcs_revision": "589c84af4f26629fbdaa7fbca712f806632ccb7e",
+  "vcs_modified": false
+}

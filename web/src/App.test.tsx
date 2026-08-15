@@ -13,6 +13,7 @@ import {
   type SessionClient,
   type SessionSnapshot,
 } from "./api/session";
+import type { RuntimeClient, RuntimeSnapshot } from "./api/runtime";
 
 function clientWith(
   session: SessionSnapshot,
@@ -22,6 +23,25 @@ function clientWith(
     getSession: vi.fn(async () => session),
     signIn: vi.fn(async () => ({ state: "authenticated" as const })),
     signOut: vi.fn(async () => undefined),
+    ...overrides,
+  };
+}
+
+function runtimeClientWith(
+  snapshot: RuntimeSnapshot = { state: "unselected" },
+  overrides: Partial<RuntimeClient> = {},
+): RuntimeClient {
+  return {
+    adoptCandidate: vi.fn(async () => snapshot),
+    getRuntime: vi.fn(async () => snapshot),
+    inspectCandidate: vi.fn(async () => ({
+      state: "missing" as const,
+      path: "/missing/lego",
+      diagnostic: {
+        code: "path_unavailable" as const,
+        message: "Path not found",
+      },
+    })),
     ...overrides,
   };
 }
@@ -40,6 +60,7 @@ describe("App authentication boundary", () => {
 
     render(
       <App
+        runtimeClient={runtimeClientWith()}
         sessionClient={clientWith({ state: "signed_out" }, { getSession })}
       />,
     );
@@ -56,7 +77,12 @@ describe("App authentication boundary", () => {
   });
 
   it("renders the honest application shell only after authentication", async () => {
-    render(<App sessionClient={clientWith({ state: "authenticated" })} />);
+    render(
+      <App
+        runtimeClient={runtimeClientWith()}
+        sessionClient={clientWith({ state: "authenticated" })}
+      />,
+    );
 
     expect(
       await screen.findByRole("heading", { name: "Certificate operations" }),
@@ -65,7 +91,7 @@ describe("App authentication boundary", () => {
       screen.getByRole("navigation", { name: "Primary navigation" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("No native workspace connected"),
+      screen.getByText("Managed operations remain blocked"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Sign out" }),
@@ -77,6 +103,7 @@ describe("App authentication boundary", () => {
     const getSession = vi.fn(async () => ({ state: "signed_out" as const }));
     render(
       <App
+        runtimeClient={runtimeClientWith()}
         sessionClient={clientWith({ state: "signed_out" }, { getSession })}
       />,
     );
@@ -89,7 +116,12 @@ describe("App authentication boundary", () => {
   });
 
   it("cannot initialize or recover the administrator through the browser", async () => {
-    render(<App sessionClient={clientWith({ state: "uninitialized" })} />);
+    render(
+      <App
+        runtimeClient={runtimeClientWith()}
+        sessionClient={clientWith({ state: "uninitialized" })}
+      />,
+    );
 
     expect(
       await screen.findByRole("heading", {
@@ -112,7 +144,10 @@ describe("App authentication boundary", () => {
       throw new SessionRequestError("invalid_credentials", 401);
     });
     render(
-      <App sessionClient={clientWith({ state: "signed_out" }, { signIn })} />,
+      <App
+        runtimeClient={runtimeClientWith()}
+        sessionClient={clientWith({ state: "signed_out" }, { signIn })}
+      />,
     );
 
     const password = await screen.findByLabelText("Administrator password");
@@ -130,7 +165,12 @@ describe("App authentication boundary", () => {
   });
 
   it("presents an expired session without retrying a prior request", async () => {
-    render(<App sessionClient={clientWith({ state: "expired" })} />);
+    render(
+      <App
+        runtimeClient={runtimeClientWith()}
+        sessionClient={clientWith({ state: "expired" })}
+      />,
+    );
 
     expect(
       await screen.findByRole("heading", { name: "Administrator sign in" }),
@@ -150,7 +190,9 @@ describe("App authentication boundary", () => {
         }),
       },
     );
-    const { unmount } = render(<App sessionClient={blocked} />);
+    const { unmount } = render(
+      <App runtimeClient={runtimeClientWith()} sessionClient={blocked} />,
+    );
     expect(
       await screen.findByRole("heading", {
         name: "AcmeMux rejected this browser request",
@@ -167,7 +209,9 @@ describe("App authentication boundary", () => {
         }),
       },
     );
-    render(<App sessionClient={unavailable} />);
+    render(
+      <App runtimeClient={runtimeClientWith()} sessionClient={unavailable} />,
+    );
     expect(
       await screen.findByRole("heading", {
         name: "Administrator state is unavailable",
@@ -180,6 +224,7 @@ describe("App authentication boundary", () => {
     const signOut = vi.fn(async () => undefined);
     render(
       <App
+        runtimeClient={runtimeClientWith()}
         sessionClient={clientWith({ state: "authenticated" }, { signOut })}
       />,
     );

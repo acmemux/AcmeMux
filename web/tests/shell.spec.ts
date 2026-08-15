@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 import { mockSession } from "./support/session";
+import { mockRuntime } from "./support/runtime";
 
 test.beforeEach(async ({ page }) => {
   await mockSession(page);
+  await mockRuntime(page);
 });
 
 test("renders an honest application shell", async ({ page }) => {
@@ -15,8 +17,14 @@ test("renders an honest application shell", async ({ page }) => {
   await expect(
     page.getByRole("navigation", { name: "Primary navigation" }),
   ).toBeVisible();
-  await expect(page.getByText("No native workspace connected")).toBeVisible();
-  await expect(page.getByText("Not connected", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Managed operations remain blocked"),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByLabel("System signal")
+      .getByText("Not connected", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
 });
 

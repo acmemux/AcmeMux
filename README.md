@@ -7,7 +7,8 @@ private-key material into its own state.
 
 The production artifact is one Go executable. It embeds the React browser
 application and forward-only SQLite migrations, listens on loopback by
-default, and is intended to run as a non-root systemd service.
+default, and refuses to serve with root user or group identities, supplementary
+group 0, or process capabilities.
 
 ## Prerequisites
 
@@ -61,4 +62,6 @@ boundaries and contributor workflow. The accepted visual and component rules
 are documented in [docs/visual-system.md](docs/visual-system.md); run
 `make catalog` to inspect the isolated component catalog. Administrator,
 session, HTTPS, and reverse-proxy operation is documented in
-[docs/security.md](docs/security.md).
+[docs/security.md](docs/security.md). Exact upstream executable support,
+selection, permissions, and upgrade qualification are documented in
+[docs/runtime-compatibility.md](docs/runtime-compatibility.md).

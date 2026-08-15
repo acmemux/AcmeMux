@@ -1,41 +1,56 @@
 import { AppShell } from "./AppShell";
-import { FeedbackPanel } from "../components/FeedbackPanel";
+import { browserRuntimeClient, type RuntimeClient } from "../api/runtime";
 import { StatusBadge } from "../components/StatusBadge";
+import {
+  RuntimePanel,
+  runtimeSignal,
+  useRuntimeController,
+} from "./RuntimePanel";
 
-const foundations = [
-  {
-    label: "Runtime trust",
-    state: "Not configured",
-    detail: "Executable selection arrives with the runtime task.",
-  },
-  {
-    label: "Native workspace",
-    state: "Not adopted",
-    detail: "No configuration or certificate evidence is connected.",
-  },
-  {
-    label: "Certificate inventory",
-    state: "Unavailable",
-    detail: "Inventory appears only after safe workspace adoption.",
-  },
-  {
-    label: "Automatic evaluation",
-    state: "Not scheduled",
-    detail: "No background certificate operation is enabled.",
-  },
-];
+export function OverviewPage({
+  runtimeClient = browserRuntimeClient,
+}: {
+  runtimeClient?: RuntimeClient;
+} = {}) {
+  const runtime = useRuntimeController(runtimeClient);
+  const signal = runtimeSignal(runtime);
+  const runtimeReady =
+    runtime.snapshot?.state === "supported" && runtime.error === null;
+  const foundations = [
+    {
+      label: "Runtime trust",
+      state: signal,
+      detail: runtimeReady
+        ? "Exact executable and compatibility manifest reviewed."
+        : "Managed operations wait for an exact supported runtime.",
+    },
+    {
+      label: "Native workspace",
+      state: "Not adopted",
+      detail: "No configuration or certificate evidence is connected.",
+    },
+    {
+      label: "Certificate inventory",
+      state: "Unavailable",
+      detail: "Inventory appears only after safe workspace adoption.",
+    },
+    {
+      label: "Automatic evaluation",
+      state: "Not scheduled",
+      detail: "No background certificate operation is enabled.",
+    },
+  ];
 
-export function OverviewPage() {
   return (
-    <AppShell>
+    <AppShell runtimeStatus={signal}>
       <main className="am-main" id="main-content">
         <header className="am-page-heading">
           <div>
             <p className="am-kicker">Workspace overview</p>
             <h1>Certificate operations</h1>
             <p className="am-lede">
-              A clear control plane for one authoritative upstream lego
-              workspace, with technical evidence available when it matters.
+              Establish trust in one administrator-provisioned lego executable,
+              then connect the authoritative native workspace it will operate.
             </p>
           </div>
           {import.meta.env.DEV ? (
@@ -46,21 +61,21 @@ export function OverviewPage() {
           ) : null}
         </header>
 
-        <FeedbackPanel tone="success" title="Administrator boundary active">
-          <p>
-            This browser has an authenticated, server-side session. Runtime,
-            workspace, and certificate features remain unavailable until their
-            delivery tasks establish the corresponding trust boundaries.
-          </p>
-        </FeedbackPanel>
+        <RuntimePanel controller={runtime} />
 
         <section className="am-readiness" aria-labelledby="readiness-heading">
           <div className="am-section-heading">
             <div>
               <p className="am-kicker">Current state</p>
-              <h2 id="readiness-heading">No native workspace connected</h2>
+              <h2 id="readiness-heading">
+                {runtimeReady
+                  ? "Runtime ready for workspace adoption"
+                  : "Managed operations remain blocked"}
+              </h2>
             </div>
-            <StatusBadge tone="not-attempted">Setup not attempted</StatusBadge>
+            <StatusBadge tone={runtimeReady ? "success" : "not-attempted"}>
+              {runtimeReady ? "Runtime trusted" : "Setup incomplete"}
+            </StatusBadge>
           </div>
           <div className="am-readiness__grid">
             {foundations.map((foundation, index) => (
@@ -117,7 +132,7 @@ export function OverviewPage() {
                 </div>
                 <div>
                   <dt>Runtime identity</dt>
-                  <dd>Not observed</dd>
+                  <dd>{signal}</dd>
                 </div>
                 <div>
                   <dt>Native paths</dt>

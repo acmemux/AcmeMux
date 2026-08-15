@@ -89,6 +89,7 @@ func TestTrustedForwardedHostAndProtoNeverAffectSecurityDecisions(t *testing.T) 
 	handler, err := New(
 		readinessStub{},
 		sharedTestIdentity(t),
+		testRuntimeDependencies(),
 		fstest.MapFS{"index.html": {Data: []byte("browser")}},
 		SecurityConfig{
 			PublicOrigin:   testPublicOrigin,
