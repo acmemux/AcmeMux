@@ -64,4 +64,6 @@ are documented in [docs/visual-system.md](docs/visual-system.md); run
 session, HTTPS, and reverse-proxy operation is documented in
 [docs/security.md](docs/security.md). Exact upstream executable support,
 selection, permissions, and upgrade qualification are documented in
-[docs/runtime-compatibility.md](docs/runtime-compatibility.md).
+[docs/runtime-compatibility.md](docs/runtime-compatibility.md). Native workspace
+selection, path review, persistence, and certificate inventory are documented
+in [docs/workspace-adoption.md](docs/workspace-adoption.md).

@@ -10,6 +10,7 @@ The foundation uses a deliberately small production dependency set.
 | golang.org/x/crypto | 0.55.0 | Argon2id password verification | BSD-3-Clause; current Go cryptography subrepository release maintained by the Go project |
 | golang.org/x/sys | 0.47.0 | Linux file-capability inspection at the executable trust boundary | BSD-3-Clause; current Go system-interface subrepository release maintained by the Go project |
 | golang.org/x/term | 0.45.0 | No-echo local administrator password input | BSD-3-Clause; current Go terminal subrepository release maintained by the Go project |
+| go.yaml.in/yaml/v3 | 3.0.5 | Bounded native YAML path discovery for workspace adoption | MIT / Apache-2.0; current canonical go-yaml v3 release with active maintenance |
 | React / React DOM | 19.2.8 | Browser component runtime | MIT; current npm releases |
 | React Aria Components | 1.20.0 | Headless accessible component behavior | Apache-2.0; current Adobe React Spectrum release with React 19 support |
 

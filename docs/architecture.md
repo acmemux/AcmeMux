@@ -19,17 +19,25 @@ non-root operating-system identity.
 - `internal/compatibility` owns exact source-backed `lego` manifests, the
   licensed upstream schema, deliberately smaller supported integration
   catalogs, and fail-closed classification.
+- `internal/workspace` owns conventional and explicit native configuration
+  discovery, bounded path projection, no-follow filesystem evidence, review
+  continuity, and durable non-content workspace selection.
+- `internal/inventory` owns the one bounded, read-only upstream certificate
+  listing and reconciliation with audited native certificate artifacts.
 - `internal/state` owns application-only SQLite state and migrations.
 - `internal/webassets` owns the browser build embedded into the executable.
-- `workspace`, `nativeconfig`, `integrations`, `jobs`, `inventory`,
-  `redaction`, and `reporting` reserve explicit product boundaries. Their
-  behavior is added only by the governing delivery tasks.
+- `nativeconfig`, `integrations`, `jobs`, `redaction`, and `reporting` reserve
+  explicit product boundaries. Their behavior is added only by the governing
+  delivery tasks.
 
 SQLite contains the migration ledger, service metadata, the Argon2id
 administrator verifier, an authentication epoch, and hashed session and expiry
 metadata. It also contains the non-secret metadata, digest, build evidence,
-manifest identifier, and review time for the one adopted executable. The
-executable itself, passwords, and raw session or CSRF tokens are never stored.
+manifest identifier, and review time for the one adopted executable, plus the
+reviewed workspace paths and bounded filesystem observations required to
+recheck that selection after restart. The executable itself, passwords, and
+raw session or CSRF tokens are never stored. Certificate inventory is refreshed
+from native evidence and is not persisted.
 Native YAML, provider credentials, EAB secrets, ACME accounts, certificates,
 chains, private keys, archives, and desired configuration do not belong in
 application state.
@@ -56,6 +64,19 @@ descriptor, and matching its exact current manifest. The one-shot start owns
 that descriptor until the child begins. A path, inode, metadata, capability, digest, output,
 build, version, platform, or manifest change blocks use until review is
 repeated.
+
+Workspace adoption is a separate native-filesystem boundary. The service
+discovers `.lego.yml` before `.lego.yaml` or accepts an explicit configuration
+with an explicit effective working directory. It resolves storage, DNS dotenv,
+and HTTP webroot references exactly from that directory, opens every component
+without following symbolic links, and displays bounded type, identity,
+ownership, mode, access, and final-object metadata before adoption. The
+administrator-reviewed fingerprint is rechecked on every later access. A
+trusted retained executable then runs only `certificates list --path <storage>
+--json` from a private neutral directory; execution is one at a time, bounded
+JSON must reconcile with the audited native certificate tree, and workspace
+evidence is checked again before a current result is returned. No YAML,
+credential, resource, certificate, or key bytes enter SQLite or the browser.
 
 The browser shell is composed from authored tokens and semantic components.
 React Aria supplies headless interaction behavior, while the application owns

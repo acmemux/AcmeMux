@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 import { mockSession } from "./support/session";
-import { mockRuntime } from "./support/runtime";
+import { mockRuntime, supportedRuntime } from "./support/runtime";
+import { mockWorkspace, readyWorkspace } from "./support/workspace";
 
 const fullPageSnapshot = {
   animations: "disabled" as const,
@@ -15,12 +16,44 @@ test.describe("wide visual contract", () => {
   test("application shell", async ({ page }) => {
     await mockSession(page);
     await mockRuntime(page);
+    await mockWorkspace(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Certificate operations" }),
     ).toBeVisible();
     await expect(page).toHaveScreenshot(
       "application-shell-wide.png",
+      fullPageSnapshot,
+    );
+  });
+
+  test("workspace evidence review", async ({ page }) => {
+    await mockSession(page);
+    await mockRuntime(page, { initial: supportedRuntime });
+    await mockWorkspace(page);
+    await page.goto("/");
+    await page.getByLabel("Effective working directory").fill("/srv/lego");
+    await page.getByRole("button", { name: "Inspect workspace" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Review native workspace evidence" }),
+    ).toBeVisible();
+    await expect(page).toHaveScreenshot(
+      "workspace-review-wide.png",
+      fullPageSnapshot,
+    );
+  });
+
+  test("reviewed workspace inventory", async ({ page }) => {
+    await mockSession(page);
+    await mockRuntime(page, { initial: supportedRuntime });
+    await mockWorkspace(page, { initial: readyWorkspace });
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: "Native workspace ready" }),
+    ).toBeVisible();
+    await expect(page.getByText("gateway.home.example").first()).toBeVisible();
+    await expect(page).toHaveScreenshot(
+      "workspace-ready-wide.png",
       fullPageSnapshot,
     );
   });
@@ -73,12 +106,27 @@ test.describe("narrow visual contract", () => {
   test("application shell", async ({ page }) => {
     await mockSession(page);
     await mockRuntime(page);
+    await mockWorkspace(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Certificate operations" }),
     ).toBeVisible();
     await expect(page).toHaveScreenshot(
       "application-shell-narrow.png",
+      fullPageSnapshot,
+    );
+  });
+
+  test("reviewed workspace inventory", async ({ page }) => {
+    await mockSession(page);
+    await mockRuntime(page, { initial: supportedRuntime });
+    await mockWorkspace(page, { initial: readyWorkspace });
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: "Native workspace ready" }),
+    ).toBeVisible();
+    await expect(page).toHaveScreenshot(
+      "workspace-ready-narrow.png",
       fullPageSnapshot,
     );
   });

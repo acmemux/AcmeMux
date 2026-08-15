@@ -24,6 +24,7 @@ func New(
 	readiness Readiness,
 	identityService *identity.Service,
 	runtimeDependencies RuntimeDependencies,
+	workspaceDependencies WorkspaceDependencies,
 	assets fs.FS,
 	config SecurityConfig,
 ) (http.Handler, error) {
@@ -36,6 +37,10 @@ func New(
 		return nil, err
 	}
 	runtimeAPI, err := newRuntimeEndpoints(identityAPI, runtimeDependencies)
+	if err != nil {
+		return nil, err
+	}
+	workspaceAPI, err := newWorkspaceEndpoints(identityAPI, workspaceDependencies)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +59,7 @@ func New(
 	})
 	identityAPI.register(multiplexer)
 	runtimeAPI.register(multiplexer)
+	workspaceAPI.register(multiplexer)
 	multiplexer.HandleFunc("/api", apiNotFound)
 	multiplexer.HandleFunc("/api/", apiNotFound)
 	multiplexer.Handle("/", browserHandler(assets))

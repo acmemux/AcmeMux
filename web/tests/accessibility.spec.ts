@@ -2,7 +2,12 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { mockSession, mockSessionFailure } from "./support/session";
-import { mockRuntime, supportedCandidate } from "./support/runtime";
+import {
+  mockRuntime,
+  supportedCandidate,
+  supportedRuntime,
+} from "./support/runtime";
+import { mockWorkspace } from "./support/workspace";
 
 const desktopViewport = { width: 1440, height: 1000 };
 
@@ -18,6 +23,7 @@ test.describe("application accessibility", () => {
   test.beforeEach(async ({ page }) => {
     await mockSession(page);
     await mockRuntime(page);
+    await mockWorkspace(page);
   });
 
   test("default desktop shell has no WCAG A or AA violations", async ({
@@ -206,6 +212,21 @@ test.describe("application accessibility", () => {
       scroll: document.documentElement.scrollWidth,
     }));
     expect(widths.scroll).toBeLessThanOrEqual(widths.client);
+    await expectNoWcagViolations(page);
+  });
+
+  test("workspace path review has no WCAG A or AA violations", async ({
+    page,
+  }) => {
+    await page.setViewportSize(desktopViewport);
+    await mockRuntime(page, { initial: supportedRuntime });
+    await page.goto("/");
+    await page.getByLabel("Effective working directory").fill("/srv/lego");
+    await page.getByRole("button", { name: "Inspect workspace" }).click();
+
+    await expect(
+      page.getByRole("heading", { name: "Review native workspace evidence" }),
+    ).toBeVisible();
     await expectNoWcagViolations(page);
   });
 });

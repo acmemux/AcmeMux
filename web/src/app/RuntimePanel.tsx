@@ -31,6 +31,7 @@ export type RuntimeController = {
   path: string;
   pathError: string | null;
   phase: RuntimePhase;
+  requestRevision: number;
   snapshot: RuntimeSnapshot | null;
   adopt(): Promise<void>;
   inspect(): Promise<void>;
@@ -79,6 +80,7 @@ export function useRuntimeController(client: RuntimeClient): RuntimeController {
   const [error, setError] = useState<string | null>(null);
   const [path, setPathValue] = useState("");
   const [pathError, setPathError] = useState<string | null>(null);
+  const [requestRevision, setRequestRevision] = useState(0);
   const requestVersion = useRef(0);
 
   const handleProtectedError = useCallback(
@@ -110,6 +112,7 @@ export function useRuntimeController(client: RuntimeClient): RuntimeController {
       if (requestVersion.current !== version) {
         return;
       }
+      setRequestRevision(version);
       setSnapshot(next);
       if (isSelectedSnapshot(next)) {
         setPathValue(next.runtime.canonicalPath);
@@ -140,6 +143,7 @@ export function useRuntimeController(client: RuntimeClient): RuntimeController {
         if (requestVersion.current !== version) {
           return;
         }
+        setRequestRevision(version);
         setSnapshot(next);
         if (isSelectedSnapshot(next)) {
           setPathValue(next.runtime.canonicalPath);
@@ -227,6 +231,7 @@ export function useRuntimeController(client: RuntimeClient): RuntimeController {
         candidate.reviewedEvidenceSha256,
       );
       if (requestVersion.current === version) {
+        setRequestRevision(version);
         setSnapshot(next);
         setCandidate(null);
         if (isSelectedSnapshot(next)) {
@@ -258,6 +263,7 @@ export function useRuntimeController(client: RuntimeClient): RuntimeController {
     path,
     pathError,
     phase,
+    requestRevision,
     refresh,
     setPath,
     snapshot,
@@ -481,7 +487,13 @@ function RuntimeEvidenceView({
   );
 }
 
-function SelectedRuntime({ snapshot }: { snapshot: RuntimeSnapshot }) {
+function SelectedRuntime({
+  snapshot,
+  trustBlocked,
+}: {
+  snapshot: RuntimeSnapshot;
+  trustBlocked: boolean;
+}) {
   if (snapshot.state === "unselected") {
     return (
       <FeedbackPanel tone="warning" title="No runtime selected">
@@ -496,11 +508,22 @@ function SelectedRuntime({ snapshot }: { snapshot: RuntimeSnapshot }) {
     const presentation = compatibilityPresentation(
       snapshot.compatibility.state,
     );
+    const recheckRequired = trustBlocked && snapshot.state === "supported";
     return (
       <div className="am-runtime-current">
-        <FeedbackPanel tone={presentation.tone} title={presentation.label}>
-          <p>{snapshot.compatibility.summary}</p>
-          {snapshot.state !== "supported" ? (
+        <FeedbackPanel
+          announcement={recheckRequired ? "assertive" : "off"}
+          tone={recheckRequired ? "warning" : presentation.tone}
+          title={
+            recheckRequired ? "Runtime recheck required" : presentation.label
+          }
+        >
+          <p>
+            {recheckRequired
+              ? "Workspace verification could not prepare the selected runtime. Its evidence is now previously reviewed, and managed operations remain blocked until the runtime is checked again."
+              : snapshot.compatibility.summary}
+          </p>
+          {snapshot.state !== "supported" && !recheckRequired ? (
             <p>
               Managed operations remain blocked until an exact supported
               manifest matches.
@@ -508,11 +531,19 @@ function SelectedRuntime({ snapshot }: { snapshot: RuntimeSnapshot }) {
           ) : null}
         </FeedbackPanel>
         <details className="am-disclosure">
-          <summary>Show reviewed runtime evidence</summary>
+          <summary>
+            {recheckRequired
+              ? "Show previously reviewed runtime evidence"
+              : "Show reviewed runtime evidence"}
+          </summary>
           <RuntimeEvidenceView
             compatibility={snapshot.compatibility}
             evidence={snapshot.runtime}
-            label="Selected executable identity"
+            label={
+              recheckRequired
+                ? "Previously reviewed executable identity"
+                : "Selected executable identity"
+            }
           />
         </details>
       </div>
@@ -547,10 +578,12 @@ function SelectedRuntime({ snapshot }: { snapshot: RuntimeSnapshot }) {
 
 function CandidateReview({
   candidate,
+  interactionDisabled,
   isAdopting,
   onAdopt,
 }: {
   candidate: RuntimeCandidate;
+  interactionDisabled: boolean;
   isAdopting: boolean;
   onAdopt: () => Promise<void>;
 }) {
@@ -602,7 +635,7 @@ function CandidateReview({
         <label className="am-runtime-confirmation">
           <input
             checked={reviewed}
-            disabled={isAdopting}
+            disabled={isAdopting || interactionDisabled}
             onChange={(event) => setReviewed(event.currentTarget.checked)}
             type="checkbox"
           />
@@ -623,7 +656,9 @@ function CandidateReview({
       )}
       <div className="am-runtime-actions">
         <ActionButton
-          isDisabled={!supported || !reviewed || isAdopting}
+          isDisabled={
+            !supported || !reviewed || isAdopting || interactionDisabled
+          }
           isPending={isAdopting}
           onPress={() => void onAdopt()}
         >
@@ -684,10 +719,14 @@ export function runtimeSignal(controller: RuntimeController): string {
 
 export function RuntimePanel({
   controller,
+  externallyBusy = false,
+  trustBlocked = false,
 }: {
   controller: RuntimeController;
+  externallyBusy?: boolean;
+  trustBlocked?: boolean;
 }) {
-  const busy = controller.phase !== "idle";
+  const busy = controller.phase !== "idle" || externallyBusy;
   const inspectionDisabled =
     busy || (Boolean(controller.error) && !controller.snapshot);
 
@@ -710,12 +749,14 @@ export function RuntimePanel({
         </div>
         <StatusBadge
           tone={
-            !controller.error && controller.snapshot?.state === "supported"
+            !trustBlocked &&
+            !controller.error &&
+            controller.snapshot?.state === "supported"
               ? "success"
               : "warning"
           }
         >
-          {runtimeSignal(controller)}
+          {trustBlocked ? "Recheck required" : runtimeSignal(controller)}
         </StatusBadge>
       </div>
 
@@ -738,6 +779,7 @@ export function RuntimePanel({
         >
           <p>{controller.error}</p>
           <ActionButton
+            isDisabled={externallyBusy}
             onPress={() => void controller.refresh()}
             variant="secondary"
           >
@@ -747,7 +789,10 @@ export function RuntimePanel({
       ) : null}
 
       {controller.snapshot && !controller.candidate ? (
-        <SelectedRuntime snapshot={controller.snapshot} />
+        <SelectedRuntime
+          snapshot={controller.snapshot}
+          trustBlocked={trustBlocked}
+        />
       ) : null}
 
       {controller.phase === "probing" ? (
@@ -772,6 +817,7 @@ export function RuntimePanel({
               : `${controller.candidate.state}:${controller.candidate.path}`
           }
           candidate={controller.candidate}
+          interactionDisabled={externallyBusy}
           isAdopting={controller.phase === "adopting"}
           onAdopt={controller.adopt}
         />

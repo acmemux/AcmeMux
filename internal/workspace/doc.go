@@ -1,3 +1,3 @@
-// Package workspace mediates the one authoritative native lego workspace.
-// Workspace adoption behavior is introduced by its dedicated delivery task.
+// Package workspace discovers and audits one native lego workspace without
+// copying its configuration, credential, or certificate contents.
 package workspace

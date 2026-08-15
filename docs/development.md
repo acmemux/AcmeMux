@@ -35,6 +35,13 @@ checked-in evidence and does not fetch upstream during ordinary verification.
 The trusted-local-checkout qualification and update procedure is in
 `runtime-compatibility.md`.
 
+`make test-workspace` runs native configuration discovery, bounded YAML path
+projection, component and permission auditing, review continuity, and SQLite
+selection checks. `make test-inventory` runs the no-shell upstream inventory,
+native artifact reconciliation, output and tree bounds, and empty-storage
+behavior. Opt-in real-executable inventory checks use an explicit qualified
+path through `ACMEMUX_TEST_LEGO`.
+
 `make run` requires `ACMEMUX_PUBLIC_ORIGIN` to name the HTTPS address served by
 the local reverse proxy. Direct HTTP remains available for health probes, but
 it is deliberately not an authenticated browser-development mode.
