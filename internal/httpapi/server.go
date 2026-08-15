@@ -3,13 +3,14 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"io/fs"
 	"mime"
 	"net/http"
 	"path"
 	"strings"
 	"time"
+
+	"github.com/sgurden-certleap/AcmeMux/internal/identity"
 )
 
 // Readiness is the application-state capability required by readiness probes.
@@ -19,7 +20,20 @@ type Readiness interface {
 
 // New returns the foundation HTTP handler with health, readiness, and embedded
 // same-origin browser routes.
-func New(readiness Readiness, assets fs.FS) http.Handler {
+func New(
+	readiness Readiness,
+	identityService *identity.Service,
+	assets fs.FS,
+	config SecurityConfig,
+) (http.Handler, error) {
+	requestBoundary, err := newRequestSecurity(config)
+	if err != nil {
+		return nil, err
+	}
+	identityAPI, err := newIdentityEndpoints(identityService, requestBoundary.trustedProxies)
+	if err != nil {
+		return nil, err
+	}
 	multiplexer := http.NewServeMux()
 	multiplexer.HandleFunc("GET /healthz", func(response http.ResponseWriter, _ *http.Request) {
 		writeJSON(response, http.StatusOK, map[string]string{"status": "healthy"})
@@ -33,15 +47,15 @@ func New(readiness Readiness, assets fs.FS) http.Handler {
 		}
 		writeJSON(response, http.StatusOK, map[string]string{"status": "ready"})
 	})
+	identityAPI.register(multiplexer)
+	multiplexer.HandleFunc("/api", apiNotFound)
+	multiplexer.HandleFunc("/api/", apiNotFound)
 	multiplexer.Handle("/", browserHandler(assets))
-	return securityHeaders(multiplexer)
+	return securityHeaders(requestBoundary.middleware(multiplexer)), nil
 }
 
-func writeJSON(response http.ResponseWriter, status int, value any) {
-	response.Header().Set("Content-Type", "application/json; charset=utf-8")
-	response.Header().Set("Cache-Control", "no-store")
-	response.WriteHeader(status)
-	_ = json.NewEncoder(response).Encode(value)
+func apiNotFound(response http.ResponseWriter, _ *http.Request) {
+	writeAPIError(response, http.StatusNotFound, "not_found", "The requested API resource was not found.")
 }
 
 func browserHandler(assets fs.FS) http.Handler {
@@ -74,15 +88,5 @@ func browserHandler(assets fs.FS) http.Handler {
 		if request.Method == http.MethodGet {
 			_, _ = response.Write(contents)
 		}
-	})
-}
-
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		response.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-		response.Header().Set("Referrer-Policy", "no-referrer")
-		response.Header().Set("X-Content-Type-Options", "nosniff")
-		response.Header().Set("X-Frame-Options", "DENY")
-		next.ServeHTTP(response, request)
 	})
 }

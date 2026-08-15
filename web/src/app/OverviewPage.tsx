@@ -38,17 +38,19 @@ export function OverviewPage() {
               workspace, with technical evidence available when it matters.
             </p>
           </div>
-          <a className="am-link-button" href="/?catalog=components">
-            View component catalog
-            <span aria-hidden="true">-&gt;</span>
-          </a>
+          {import.meta.env.DEV ? (
+            <a className="am-link-button" href="/?catalog=components">
+              View component catalog
+              <span aria-hidden="true">-&gt;</span>
+            </a>
+          ) : null}
         </header>
 
-        <FeedbackPanel tone="info" title="Foundation ready">
+        <FeedbackPanel tone="success" title="Administrator boundary active">
           <p>
-            The visual and accessibility system is active. Runtime, workspace,
-            and certificate features remain unavailable until their delivery
-            tasks establish the corresponding trust boundaries.
+            This browser has an authenticated, server-side session. Runtime,
+            workspace, and certificate features remain unavailable until their
+            delivery tasks establish the corresponding trust boundaries.
           </p>
         </FeedbackPanel>
 

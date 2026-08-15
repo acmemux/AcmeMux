@@ -5,8 +5,9 @@ STATICCHECK_VERSION := v0.7.0
 GOVULNCHECK_VERSION := v1.7.0
 GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
+export GOMODCACHE := $(CURDIR)/.cache/go-mod
 
-.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-browser test-race test-visual test-visual-update test-web toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-browser test-identity test-race test-visual test-visual-update test-web toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -37,7 +38,7 @@ test-race:
 
 vuln:
 	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) $(GO_PACKAGES)
-	cd web && npm audit --audit-level=high
+	cd web && npm audit --audit-level=low
 
 web-build:
 	cd web && npm run build
@@ -50,6 +51,9 @@ test-browser:
 
 test-web:
 	cd web && npm run test
+
+test-identity:
+	go test ./cmd/acmemux/... ./internal/appconfig/... ./internal/httpapi/... ./internal/identity/... ./internal/state/...
 
 test-accessibility:
 	cd web && npm run test:accessibility
@@ -68,6 +72,7 @@ build: web-build
 	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o dist/acmemux ./cmd/acmemux
 
 run: web-build
+	@test -n "$(ACMEMUX_PUBLIC_ORIGIN)" || (echo "ACMEMUX_PUBLIC_ORIGIN must name the HTTPS browser origin" && exit 1)
 	go run ./cmd/acmemux serve --state-dir ./var
 
 verify: toolchain-check format-check lint test test-race vuln web-verify test-browser build

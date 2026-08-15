@@ -20,7 +20,7 @@ const states: Array<{ tone: StatusTone; label: string }> = [
 
 export function ComponentCatalog() {
   return (
-    <AppShell>
+    <AppShell isCatalog>
       <main className="am-main am-catalog" id="main-content">
         <header className="am-page-heading">
           <div>

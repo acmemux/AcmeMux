@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { useOptionalAuthenticatedSession } from "../auth/AuthBoundary";
+import { ActionButton } from "../components/ActionButton";
 import { BrandMark } from "../components/BrandMark";
 import { StatusBadge } from "../components/StatusBadge";
 
@@ -12,7 +14,18 @@ const navigation = [
   { label: "Settings", state: "planned" },
 ] as const;
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({
+  children,
+  isCatalog = false,
+}: {
+  children: ReactNode;
+  isCatalog?: boolean;
+}) {
+  const session = useOptionalAuthenticatedSession();
+  if (!isCatalog && !session) {
+    throw new Error("Authenticated session context is unavailable");
+  }
+
   return (
     <div className="am-shell">
       <a className="am-skip-link" href="#main-content">
@@ -20,17 +33,43 @@ export function AppShell({ children }: { children: ReactNode }) {
       </a>
       <header className="am-topbar">
         <a className="am-brand" href="/" aria-label="AcmeMux overview">
-          <BrandMark />
+          <BrandMark decorative />
           <span>
             <strong>AcmeMux</strong>
             <small>Native lego control plane</small>
           </span>
         </a>
-        <div className="am-foundation-state" role="status">
-          <StatusBadge tone="info">Application foundation</StatusBadge>
+        <div className="am-session-controls">
+          {session ? (
+            <>
+              <StatusBadge tone="success">Session active</StatusBadge>
+              <span className="am-scope">
+                Single administrator / one workspace
+              </span>
+              <ActionButton
+                isDisabled={session.isSigningOut}
+                isPending={session.isSigningOut}
+                onPress={() => void session.signOut()}
+                variant="quiet"
+              >
+                {session.isSigningOut ? "Signing out" : "Sign out"}
+              </ActionButton>
+            </>
+          ) : (
+            <>
+              <StatusBadge tone="info">Component catalog</StatusBadge>
+              <span className="am-scope">Development only</span>
+            </>
+          )}
         </div>
-        <span className="am-scope">Single administrator / one workspace</span>
       </header>
+
+      {session?.signOutError ? (
+        <div className="am-session-notice" role="alert">
+          <strong>Sign-out not confirmed.</strong>
+          <span>{session.signOutError}</span>
+        </div>
+      ) : null}
 
       <div className="am-shell__frame">
         <aside className="am-sidebar">
