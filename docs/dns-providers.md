@@ -1,8 +1,8 @@
 # DNS-01 providers
 
 AcmeMux supports DNS-01 through the upstream `lego` provider codes
-`azuredns`, `cloudflare`, `digitalocean`, `duckdns`, and `route53` in the current cloud provider
-manifest. The exact admitted Linux amd64 `lego` artifacts are the same
+`azuredns`, `cloudflare`, `digitalocean`, `duckdns`, and `route53`. The
+supported Linux amd64 `lego` artifacts are the same
 v5.3.1 and reviewed source-revision artifacts documented in
 `runtime-compatibility.md`. A provider compiled into another executable is not
 automatically supported.
@@ -10,7 +10,7 @@ automatically supported.
 Each DNS challenge writes its provider code, resolver behavior, propagation
 policy, and one `envFile` reference into native YAML. Credentials and provider
 overrides remain only in that restrictive native dotenv file. AcmeMux never
-copies them into SQLite, returns secret values to the browser, or places them
+copies them into its own state, returns secret values to the browser, or places them
 in process arguments. Upstream `lego` loads the file and performs every DNS API
 request.
 
@@ -95,15 +95,15 @@ Endpoint overrides require HTTPS, except loopback HTTP for isolated tests.
 Supply the account token as the write-only `DUCKDNS_TOKEN`. DuckDNS has one TXT
 record shared by a registered domain and its subdomains. Upstream `lego`
 therefore performs DuckDNS challenges sequentially; the form exposes the
-source-backed sequence interval along with propagation, polling, and HTTP
+sequence interval along with propagation, polling, and HTTP
 timeouts.
 
 ## Credential rotation
 
 Open the existing DNS challenge, choose Replace for the credential being
 rotated, and preview the change. Secret summaries show only that a value will
-be replaced. Saving uses the shared workspace lock and the journaled
-same-directory `0600` replacement flow. For split Cloudflare tokens, rotate
+be replaced. Saving uses the shared workspace lock and private same-directory
+replacement. For split Cloudflare tokens, rotate
 the DNS and zone tokens together when the provider change requires both.
 
 Changing an adopted challenge to a different provider is intentionally not an
@@ -116,13 +116,13 @@ Rotate Azure secrets, certificates, assertions, CLI caches, AWS static
 sessions, or shared-profile files at their native source, then preview the
 native field or file identity change before running. Temporary sessions must
 remain valid for the complete operation timeout. Changing a cloud
-authentication mode removes obsolete variables in the same journaled dotenv
-replacement; review the operation preview for file, helper, and metadata
+authentication mode removes obsolete variables from the credential file;
+review the operation preview for file, helper, and metadata
 consequences.
 
 Upstream `_FILE` environment variants are not an AcmeMux credential path: they
-would introduce an additional secret file outside the adopted manifest-owned
-dotenv boundary. Import the credential through the write-only field instead.
+would introduce another secret file outside the adopted workspace boundary.
+Import the credential through the write-only field instead.
 
 ## Troubleshooting
 
@@ -144,8 +144,3 @@ dotenv boundary. Import the credential through the write-only field instead.
   native inventory and redacted result before retrying.
 - DuckDNS names must ultimately map to the account's registered DuckDNS domain;
   upstream reports provider-specific naming failures.
-
-The credentialed release smoke is deliberately separate from ordinary tests.
-`make test-provider-core-smoke` requires an isolated native configuration and
-explicit `ACMEMUX_PROVIDER_SMOKE=1`; it discards upstream output so provider
-responses cannot enter routine logs or fixtures.
