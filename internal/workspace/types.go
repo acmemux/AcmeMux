@@ -77,6 +77,9 @@ const (
 	RoleDotenv           PathRole = "dotenv"
 	RoleWebroot          PathRole = "webroot"
 	RoleWorkspace        PathRole = "workspace"
+	RoleCloudCredential  PathRole = "cloud_credential"
+	RoleCloudHelper      PathRole = "cloud_helper"
+	RoleCloudDirectory   PathRole = "cloud_directory"
 )
 
 // PathType is the no-follow type observed for a path component.

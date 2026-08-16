@@ -168,7 +168,7 @@ func (service *Service) Preview(ctx context.Context) (Preview, error) {
 	}
 	defer plan.Close()
 	return Preview{
-		ReviewedPreviewToken: service.reviewToken(plan.Revision, plan.Intent),
+		ReviewedPreviewToken: service.reviewToken(plan.Revision, plan.ReviewedEvidenceSHA256, plan.Intent),
 		Intent:               cloneIntent(plan.Intent), Policy: service.policy,
 	}, nil
 }
@@ -196,7 +196,7 @@ func (service *Service) Enqueue(
 		_ = lease.Release()
 		return jobs.Operation{}, operationPreparationError(operationErr)
 	}
-	expected := service.reviewToken(plan.Revision, plan.Intent)
+	expected := service.reviewToken(plan.Revision, plan.ReviewedEvidenceSHA256, plan.Intent)
 	if subtle.ConstantTimeCompare([]byte(expected), []byte(reviewedPreviewToken)) != 1 {
 		plan.Close()
 		_ = lease.Release()
@@ -286,13 +286,18 @@ func cloneIntent(value configuration.ExecutionIntent) configuration.ExecutionInt
 	for index := range value.Certificates {
 		value.Certificates[index].Domains = slices.Clone(value.Certificates[index].Domains)
 	}
+	value.CloudAccess = slices.Clone(value.CloudAccess)
+	for index := range value.CloudAccess {
+		value.CloudAccess[index].Files = slices.Clone(value.CloudAccess[index].Files)
+	}
 	return value
 }
 
-func (service *Service) reviewToken(revision string, intent configuration.ExecutionIntent) string {
+func (service *Service) reviewToken(revision, evidence string, intent configuration.ExecutionIntent) string {
 	mac := hmac.New(sha256.New, service.tokenKey)
-	writeTokenText(mac, "acmemux-manual-operation-preview-v1")
+	writeTokenText(mac, "acmemux-manual-operation-preview-v2")
 	writeTokenText(mac, revision)
+	writeTokenText(mac, evidence)
 	writeTokenText(mac, intent.WorkingDirectory)
 	writeTokenText(mac, intent.ConfigurationPath)
 	writeTokenText(mac, intent.StoragePath)
@@ -309,6 +314,18 @@ func (service *Service) reviewToken(revision string, intent configuration.Execut
 		writeTokenText(mac, certificate.CA)
 		writeTokenText(mac, certificate.ChallengeName)
 		writeTokenText(mac, certificate.ChallengeMode)
+	}
+	writeTokenInteger(mac, uint64(len(intent.CloudAccess)))
+	for _, access := range intent.CloudAccess {
+		writeTokenText(mac, access.ChallengeName)
+		writeTokenText(mac, access.Provider)
+		writeTokenText(mac, access.AuthMode)
+		writeTokenInteger(mac, uint64(len(access.Files)))
+		for _, path := range access.Files {
+			writeTokenText(mac, path)
+		}
+		writeTokenText(mac, access.Helper)
+		writeTokenText(mac, access.Metadata)
 	}
 	writeTokenInteger(mac, uint64(service.policy.Timeout/time.Second))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))

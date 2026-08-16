@@ -69,7 +69,7 @@ file-mode process contract is:
 | Arguments | Exactly `--config <absolute-native-configuration-path>` |
 | Working directory | The adopted effective working directory |
 | Broker environment | `LANG=C`, `LC_ALL=C`, `TZ=UTC`, and one per-operation random `ACMEMUX_BROKER_PROCESS_GUARD_<hex>=1` lineage marker |
-| Additional environment | No inherited provider credentials; supported DNS-01 credentials are loaded by upstream `lego` from the exact reviewed native `envFile` |
+| Additional environment | No inherited provider credentials or `HOME`; DNS-01 credentials load from the exact reviewed native `envFile`, except sensitive snapshots used to pin an Azure OIDC assertion file or an audited AWS shared profile |
 | Standard input | Not connected |
 | Concurrency | One shared workspace lease across preflight, process execution, and reconciliation |
 | Runtime limit | 1,800 seconds |

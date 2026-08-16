@@ -5,9 +5,9 @@ files as authoritative. It does not keep a second desired-state document in
 SQLite and does not provide a raw YAML editor, arbitrary environment-variable
 editor, or generic command interface.
 
-The production `native-core-dns-providers-v1` integration manifest projects
+The production `native-cloud-dns-providers-v1` integration manifest projects
 the curated storage, account, accepted CA, certificate, renewal, HTTP-01, and
-Cloudflare, DigitalOcean, and DuckDNS DNS-01 fields documented in
+Azure DNS, Cloudflare, DigitalOcean, DuckDNS, and Route 53 DNS-01 fields documented in
 `ca-certificate-http.md` and `dns-providers.md`. It can create a first native
 configuration or edit an adopted compatible one. The browser still receives
 only logical field identifiers, bounded typed values, and server-derived

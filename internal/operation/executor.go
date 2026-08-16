@@ -105,10 +105,17 @@ func (executor *executor) Execute(ctx context.Context, _ string, request jobs.Re
 		}
 	}
 	preparedOwned = false
+	environment := make([]broker.Variable, len(plan.Environment))
+	for index := range plan.Environment {
+		environment[index] = broker.Variable{Name: plan.Environment[index].Name, Value: plan.Environment[index].Value, Sensitive: plan.Environment[index].Sensitive}
+	}
 	brokerResult, brokerErr := executor.broker.Run(ctx, broker.Request{
 		Prepared: prepared, WorkingDirectory: plan.Intent.WorkingDirectory,
-		ConfigurationPath: plan.Intent.ConfigurationPath, ObservedSecrets: plan.ObservedSecrets,
+		ConfigurationPath: plan.Intent.ConfigurationPath, Environment: environment, ObservedSecrets: plan.ObservedSecrets,
 	})
+	for index := range environment {
+		environment[index].Value = nil
+	}
 	plan.Close()
 	phaseErr := report(jobs.PhaseRefreshingInventory)
 	afterInventory, inventoryResult := executor.refreshInventory(ctx, lease, storagePath)

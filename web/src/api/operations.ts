@@ -58,8 +58,35 @@ export type ManualOperationIntent = {
     challenge: {
       name: string;
       kind: "http-01" | "dns-01";
-      mode: "listener" | "webroot" | "cloudflare" | "digitalocean" | "duckdns";
+      mode:
+        | "listener"
+        | "webroot"
+        | "cloudflare"
+        | "digitalocean"
+        | "duckdns"
+        | "azuredns"
+        | "route53";
     };
+  }>;
+  cloudAccess: Array<{
+    challengeName: string;
+    provider: "azuredns" | "route53";
+    authMode:
+      | "env"
+      | "wli"
+      | "msi"
+      | "cli"
+      | "oidc"
+      | "pipeline"
+      | "static"
+      | "shared_profile"
+      | "instance_role"
+      | "static+assume_role"
+      | "shared_profile+assume_role"
+      | "instance_role+assume_role";
+    files: string[];
+    helper: string | null;
+    metadata: string | null;
   }>;
   nativeEffects: [
     "acme_accounts_may_change",
@@ -364,7 +391,9 @@ function decodePreviewCertificate(
     (value.challenge.kind === "dns-01" &&
       value.challenge.mode !== "cloudflare" &&
       value.challenge.mode !== "digitalocean" &&
-      value.challenge.mode !== "duckdns")
+      value.challenge.mode !== "duckdns" &&
+      value.challenge.mode !== "azuredns" &&
+      value.challenge.mode !== "route53")
   ) {
     invalidResponse();
   }
@@ -379,6 +408,57 @@ function decodePreviewCertificate(
       mode: value.challenge
         .mode as ManualOperationIntent["certificates"][number]["challenge"]["mode"],
     },
+  };
+}
+
+const cloudAuthModes = new Set([
+  "env",
+  "wli",
+  "msi",
+  "cli",
+  "oidc",
+  "pipeline",
+  "static",
+  "shared_profile",
+  "instance_role",
+  "static+assume_role",
+  "shared_profile+assume_role",
+  "instance_role+assume_role",
+]);
+
+function decodeCloudAccess(
+  value: unknown,
+): ManualOperationIntent["cloudAccess"][number] {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "challengeName",
+      "provider",
+      "authMode",
+      "files",
+      "helper",
+      "metadata",
+    ]) ||
+    typeof value.challengeName !== "string" ||
+    !identifierPattern.test(value.challengeName) ||
+    (value.provider !== "azuredns" && value.provider !== "route53") ||
+    typeof value.authMode !== "string" ||
+    !cloudAuthModes.has(value.authMode) ||
+    !Array.isArray(value.files) ||
+    value.files.length > 8 ||
+    !value.files.every(validCanonicalPath) ||
+    (value.helper !== null && !validCanonicalPath(value.helper)) ||
+    (value.metadata !== null && !boundedText(value.metadata, 128))
+  )
+    invalidResponse();
+  return {
+    challengeName: value.challengeName,
+    provider: value.provider,
+    authMode:
+      value.authMode as ManualOperationIntent["cloudAccess"][number]["authMode"],
+    files: [...value.files] as string[],
+    helper: value.helper as string | null,
+    metadata: value.metadata as string | null,
   };
 }
 
@@ -399,6 +479,7 @@ function decodeIntent(value: unknown): ManualOperationIntent {
       "storagePath",
       "runtime",
       "certificates",
+      "cloudAccess",
       "nativeEffects",
     ]) ||
     value.kind !== "manual_workspace_run" ||
@@ -415,6 +496,8 @@ function decodeIntent(value: unknown): ManualOperationIntent {
     !Array.isArray(value.certificates) ||
     value.certificates.length < 1 ||
     value.certificates.length > MAX_PREVIEW_CERTIFICATES ||
+    !Array.isArray(value.cloudAccess) ||
+    value.cloudAccess.length > MAX_PREVIEW_CERTIFICATES ||
     !Array.isArray(value.nativeEffects) ||
     value.nativeEffects.length !== nativeEffects.length ||
     !nativeEffects.every(
@@ -424,6 +507,7 @@ function decodeIntent(value: unknown): ManualOperationIntent {
     invalidResponse();
   }
   const certificates = value.certificates.map(decodePreviewCertificate);
+  const cloudAccess = value.cloudAccess.map(decodeCloudAccess);
   if (
     certificates.some(
       (certificate, index) =>
@@ -442,6 +526,7 @@ function decodeIntent(value: unknown): ManualOperationIntent {
       manifestId: value.runtime.manifestId,
     },
     certificates,
+    cloudAccess,
     nativeEffects: [...nativeEffects],
   };
 }

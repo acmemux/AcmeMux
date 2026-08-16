@@ -1,7 +1,7 @@
-# Core DNS-01 providers
+# DNS-01 providers
 
 AcmeMux supports DNS-01 through the upstream `lego` provider codes
-`cloudflare`, `digitalocean`, and `duckdns` in the current core provider
+`azuredns`, `cloudflare`, `digitalocean`, `duckdns`, and `route53` in the current cloud provider
 manifest. The exact admitted Linux amd64 `lego` artifacts are the same
 v5.3.1 and reviewed source-revision artifacts documented in
 `runtime-compatibility.md`. A provider compiled into another executable is not
@@ -13,6 +13,56 @@ overrides remain only in that restrictive native dotenv file. AcmeMux never
 copies them into SQLite, returns secret values to the browser, or places them
 in process arguments. Upstream `lego` loads the file and performs every DNS API
 request.
+
+The service process environment is never inherited. Cloud authentication is
+an explicit union: selecting one mode removes variables belonging to other
+modes. AcmeMux audits every selected credential or token file without following
+links, requires confidential ownership and mode, and rechecks its identity
+before execution. It does not supply a default `HOME`. Azure CLI mode names one
+audited `az` helper directory and cache directory; AWS shared-profile mode names
+one audited credentials file and profile. Managed and instance identity modes
+are the only modes that permit their documented metadata service.
+
+## Azure DNS
+
+Azure DNS maps public, US Government, and China clouds; subscription, resource
+group, exact zone, and public/private-zone selection to upstream `AZURE_*`
+variables. Choose exactly one service-principal secret or certificate,
+workload identity, managed identity, Azure CLI, OIDC, or Azure Pipelines mode.
+Certificate, workload, and assertion files are audited confidential files.
+Azure Arc endpoints must be a complete loopback-HTTP pair. CLI mode uses an
+audited executable in a single-directory `PATH` and an explicit
+`AZURE_CONFIG_DIR`. OIDC accepts exactly one inline assertion, audited assertion
+file, or HTTPS assertion endpoint plus write-only bearer token.
+
+AcmeMux always sets upstream `AZURE_AUTH_METHOD`; the SDK's broad default chain
+is not exposed. For an OIDC assertion file, AcmeMux snapshots the audited bytes
+into sensitive operation memory while retaining the file path, satisfying
+upstream's equality check and preventing a file-only assertion race.
+
+Grant Reader on the exact DNS zone and DNS Zone Contributor only on required
+`_acme-challenge` TXT record sets. Private DNS uses the corresponding
+private-zone scope. Avoid subscription-wide Contributor.
+
+## Amazon Route 53
+
+Route 53 requires an explicit region and one base identity: static or temporary
+credentials, one audited shared profile, or an explicitly acknowledged EC2
+instance role. Static and shared modes set `AWS_EC2_METADATA_DISABLED=true`;
+only instance-role mode enables metadata. `AWS_SDK_LOAD_CONFIG=false` and the
+absence of `HOME` prevent implicit config, SSO, nested profile, and helper
+discovery. A shared profile may contain only an access key, secret key, and
+optional session token. AcmeMux snapshots those selected values into sensitive
+broker variables so the SDK cannot race or recurse through the file.
+
+Any base identity may assume one explicit role; an external ID is accepted only
+with that role. Hosted-zone override, public/private zone, change waiting,
+retry count, TTL, propagation timeout, and polling interval map to upstream.
+For least privilege, allow `route53:GetChange`, and constrain
+`ListResourceRecordSets` and `ChangeResourceRecordSets` to the selected zone,
+TXT type, and normalized `_acme-challenge` names. `ListHostedZonesByName` is
+needed only without a hosted-zone override. A separate base identity needs only
+`sts:AssumeRole` when the DNS role owns those permissions.
 
 ## Cloudflare
 
@@ -62,6 +112,14 @@ reassign certificates, review and save, then remove the old native integration
 in a separately reviewed cleanup. This keeps every credential-file transition
 explicit and auditable.
 
+Rotate Azure secrets, certificates, assertions, CLI caches, AWS static
+sessions, or shared-profile files at their native source, then preview the
+native field or file identity change before running. Temporary sessions must
+remain valid for the complete operation timeout. Changing a cloud
+authentication mode removes obsolete variables in the same journaled dotenv
+replacement; review the operation preview for file, helper, and metadata
+consequences.
+
 Upstream `_FILE` environment variants are not an AcmeMux credential path: they
 would introduce an additional secret file outside the adopted manifest-owned
 dotenv boundary. Import the credential through the write-only field instead.
@@ -73,6 +131,12 @@ dotenv boundary. Import the credential through the write-only field instead.
   duplicate `CF_*` and `CLOUDFLARE_*` spellings.
 - An unsupported dotenv key is preserved but blocks managed execution. Remove
   it only after confirming it is not required outside AcmeMux.
+- Azure files must be absolute, confidential, single-link regular files. Azure
+  Arc metadata endpoints are loopback-only; CLI mode fails if `az` or its cache
+  directory is untrusted.
+- Route 53 shared profiles reject config keys, role recursion, SSO, and helper
+  processes. An instance role must be selected explicitly; other AWS modes
+  cannot fall back to metadata.
 - Resolver overrides accept at most eight host or IP values with optional
   ports. A fixed propagation wait cannot be mixed with disabled authoritative
   or recursive checks.

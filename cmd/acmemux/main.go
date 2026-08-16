@@ -107,6 +107,7 @@ func runServer(arguments []string) error {
 		Classify:          compatibility.Classify,
 		Coordinator:       workspaceCoordinator,
 		Transactions:      transactions,
+		CloudAccess:       workspaceInspector,
 	})
 	if err != nil {
 		return fmt.Errorf("initialize native configuration service: %w", err)

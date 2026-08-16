@@ -225,6 +225,21 @@ func TestOperationEndpointsPresentBoundedPreviewLifecycleAndResult(t *testing.T)
 	}
 }
 
+func TestOperationPreviewPresentsCloudIdentityConsequencesWithoutSecrets(t *testing.T) {
+	preview := operationPreviewFixture()
+	preview.Intent.Certificates[0].ChallengeKind = "dns-01"
+	preview.Intent.Certificates[0].ChallengeMode = "route53"
+	preview.Intent.CloudAccess = []configuration.ExecutionCloudAccess{{
+		ChallengeName: "web", Provider: "route53", AuthMode: "shared_profile+assume_role",
+		Files: []string{"/etc/acmemux/aws-credentials"}, Metadata: "",
+	}}
+	presented, ok := presentOperationPreview(preview)
+	if !ok || len(presented.Intent.CloudAccess) != 1 || presented.Intent.CloudAccess[0].AuthMode != "shared_profile+assume_role" ||
+		presented.Intent.CloudAccess[0].Files[0] != "/etc/acmemux/aws-credentials" {
+		t.Fatalf("cloud preview = %#v, %v", presented, ok)
+	}
+}
+
 func TestOperationEndpointsEnforceAuthenticationCSRFAndStrictBodies(t *testing.T) {
 	harness := newOperationHTTPHarness(t)
 	unauthenticated := httptest.NewRecorder()

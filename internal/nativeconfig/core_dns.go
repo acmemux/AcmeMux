@@ -2,6 +2,7 @@ package nativeconfig
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
@@ -14,6 +15,7 @@ import (
 func (i Inspection) WithCoreDNSCredentialValidation(strict bool) Inspection {
 	providers := make(map[string]string)
 	presence := make(map[string]map[integrations.FieldID]bool)
+	values := make(map[string]map[integrations.FieldID]string)
 	for _, field := range i.Projection {
 		challenge := bindingFor(field.Bindings, integrations.BindingChallenge)
 		if challenge == "" {
@@ -32,8 +34,14 @@ func (i Inspection) WithCoreDNSCredentialValidation(strict bool) Inspection {
 		}
 		if presence[challenge] == nil {
 			presence[challenge] = make(map[integrations.FieldID]bool)
+			values[challenge] = make(map[integrations.FieldID]string)
 		}
 		presence[challenge][field.FieldID] = field.PresenceKnown && field.Present && field.Configured
+		if value, ok := field.Value(); ok {
+			if text, stringValue := value.String(); stringValue {
+				values[challenge][field.FieldID] = text
+			}
+		}
 	}
 	challenges := make([]string, 0, len(providers))
 	for challenge := range providers {
@@ -42,10 +50,14 @@ func (i Inspection) WithCoreDNSCredentialValidation(strict bool) Inspection {
 	sort.Strings(challenges)
 	for _, challenge := range challenges {
 		provider := providers[challenge]
-		if !integrations.SupportsCoreDNSProvider(provider) {
+		if !slices.Contains(integrations.SupportedDNSProviders(), provider) {
 			continue
 		}
-		if len(integrations.CoreDNSCredentialIssues(provider, presence[challenge])) == 0 {
+		issues := integrations.CoreDNSCredentialIssues(provider, presence[challenge])
+		if provider == "azuredns" || provider == "route53" {
+			issues = integrations.CloudDNSCredentialIssues(provider, presence[challenge], values[challenge])
+		}
+		if len(issues) == 0 {
 			continue
 		}
 		class := IssueUnsupported

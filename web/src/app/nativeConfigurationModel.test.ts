@@ -1309,4 +1309,96 @@ describe("native configuration model", () => {
     };
     expect(validateDraft(draft)).toEqual([]);
   });
+
+  it("maps an explicit Azure client-secret mode without unrelated ambient credentials", () => {
+    const draft = validDraft();
+    const challenge = newDNSChallenge("dns-azure");
+    challenge.provider = "azuredns";
+    challenge.originalProvider = "azuredns";
+    challenge.envFile = ".azuredns.env";
+    challenge.cloudAuthMode = "azure_client_secret";
+    challenge.originalCloudAuthMode = "azure_client_secret";
+    challenge.providerSettings = {
+      [managedFieldIds.azureEnvironment]: "public",
+      [managedFieldIds.azureSubscriptionId]: "subscription",
+      [managedFieldIds.azureResourceGroup]: "dns",
+      [managedFieldIds.azurePrivateZone]: "false",
+      [managedFieldIds.azureAuthMethod]: "env",
+      [managedFieldIds.azureTenantId]: "tenant",
+      [managedFieldIds.azureClientId]: "client",
+    };
+    challenge.cloudSecrets[managedFieldIds.azureClientSecret] = {
+      action: "replace",
+      secret: "azure-secret",
+    };
+    draft.challenges = [challenge];
+    draft.certificates[0]!.challenge = challenge.name;
+    expect(validateDraft(draft)).toEqual([]);
+    const changes = changesFromDraft(draft, [], true);
+    expect(changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldId: managedFieldIds.azureAuthMethod,
+          value: "env",
+        }),
+        expect.objectContaining({
+          fieldId: managedFieldIds.azureClientSecret,
+          value: "azure-secret",
+        }),
+        expect.objectContaining({
+          fieldId: managedFieldIds.azurePrivateZone,
+          value: "false",
+        }),
+      ]),
+    );
+    expect(
+      changes.some(
+        (change) => change.fieldId === managedFieldIds.azureFederatedTokenFile,
+      ),
+    ).toBe(false);
+  });
+
+  it("maps a Route 53 shared profile with metadata and HOME isolation controls", () => {
+    const draft = validDraft();
+    const challenge = newDNSChallenge("dns-aws");
+    challenge.provider = "route53";
+    challenge.originalProvider = "route53";
+    challenge.envFile = ".route53.env";
+    challenge.cloudAuthMode = "aws_shared_profile";
+    challenge.originalCloudAuthMode = "aws_shared_profile";
+    challenge.providerSettings = {
+      [managedFieldIds.awsRegion]: "us-east-1",
+      [managedFieldIds.awsPrivateZone]: "false",
+      [managedFieldIds.awsSdkLoadConfig]: "false",
+      [managedFieldIds.awsEc2MetadataDisabled]: "true",
+      [managedFieldIds.awsProfile]: "acmemux",
+      [managedFieldIds.awsSharedCredentialsFile]:
+        "/etc/acmemux/aws-credentials",
+    };
+    draft.challenges = [challenge];
+    draft.certificates[0]!.challenge = challenge.name;
+    expect(validateDraft(draft)).toEqual([]);
+    const changes = changesFromDraft(draft, [], true);
+    expect(changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldId: managedFieldIds.awsProfile,
+          value: "acmemux",
+        }),
+        expect.objectContaining({
+          fieldId: managedFieldIds.awsSdkLoadConfig,
+          value: "false",
+        }),
+        expect.objectContaining({
+          fieldId: managedFieldIds.awsEc2MetadataDisabled,
+          value: "true",
+        }),
+      ]),
+    );
+    expect(
+      changes.some(
+        (change) => change.fieldId === managedFieldIds.awsAccessKeyId,
+      ),
+    ).toBe(false);
+  });
 });

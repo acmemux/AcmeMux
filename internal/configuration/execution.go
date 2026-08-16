@@ -38,6 +38,24 @@ type ExecutionIntent struct {
 	RuntimeIdentity   string
 	RuntimeManifestID compatibility.ManifestID
 	Certificates      []ExecutionCertificate
+	CloudAccess       []ExecutionCloudAccess
+}
+
+// ExecutionCloudAccess explains the exact ambient capability selected for a
+// cloud DNS challenge without exposing a credential value.
+type ExecutionCloudAccess struct {
+	ChallengeName string
+	Provider      string
+	AuthMode      string
+	Files         []string
+	Helper        string
+	Metadata      string
+}
+
+type ExecutionEnvironment struct {
+	Name      string
+	Value     []byte
+	Sensitive bool
 }
 
 // ExecutionPlan is an operation-scoped native execution snapshot. Revision is
@@ -48,6 +66,8 @@ type ExecutionPlan struct {
 	Revision               string
 	ReviewedEvidenceSHA256 string
 	ObservedSecrets        [][]byte
+	Environment            []ExecutionEnvironment
+	cloudEvidence          []workspace.PathEvidence
 	closed                 bool
 }
 
@@ -61,6 +81,12 @@ func (plan *ExecutionPlan) Close() {
 		plan.ObservedSecrets[index] = nil
 	}
 	plan.ObservedSecrets = nil
+	for index := range plan.Environment {
+		clear(plan.Environment[index].Value)
+		plan.Environment[index].Value = nil
+	}
+	plan.Environment = nil
+	plan.cloudEvidence = nil
 	for index := range plan.Intent.Certificates {
 		clear(plan.Intent.Certificates[index].Domains)
 		plan.Intent.Certificates[index].Domains = nil
@@ -87,6 +113,11 @@ func (service *Service) PrepareExecution(ctx context.Context, lease *workspace.L
 	if err != nil {
 		return nil, err
 	}
+	cloudAccess, environment, cloudSecrets, cloudEvidence, err := service.prepareCloudAccess(ctx, evaluated, intent)
+	if err != nil {
+		return nil, err
+	}
+	intent.CloudAccess = cloudAccess
 	secrets, err := evaluated.runtime.engine.ObservedSecrets(evaluated.sources.Configuration.Content)
 	if err != nil {
 		return nil, fmt.Errorf("%w: inspect native operation secrets", ErrUnavailable)
@@ -127,10 +158,26 @@ func (service *Service) PrepareExecution(ctx context.Context, lease *workspace.L
 			secrets = append(secrets, value)
 		}
 	}
+	for _, value := range cloudSecrets {
+		duplicate := false
+		for _, existing := range secrets {
+			if bytes.Equal(existing, value) {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			clear(value)
+		} else {
+			secrets = append(secrets, value)
+		}
+	}
 	plan := &ExecutionPlan{
 		Intent: intent, Revision: evaluated.view.Source.BaseRevisionToken,
-		ReviewedEvidenceSHA256: executionEvidenceDigest(evaluated, intent),
+		ReviewedEvidenceSHA256: executionEvidenceDigest(evaluated, intent, cloudEvidence),
 		ObservedSecrets:        secrets,
+		Environment:            environment,
+		cloudEvidence:          cloudEvidence,
 	}
 	complete = true
 	return plan, nil
@@ -141,10 +188,10 @@ func (service *Service) PrepareExecution(ctx context.Context, lease *workspace.L
 // evidence. Source content digests are intentionally excluded: Linux inode,
 // size, mtime, and ctime evidence binds intervening content changes without
 // persisting a credential-guessing oracle.
-func executionEvidenceDigest(evaluated *evaluation, intent ExecutionIntent) string {
+func executionEvidenceDigest(evaluated *evaluation, intent ExecutionIntent, cloudEvidence []workspace.PathEvidence) string {
 	digest := sha256.New()
 	writer := &tokenWriter{mac: digest}
-	writer.text("acmemux-manual-operation-evidence-v1")
+	writer.text("acmemux-manual-operation-evidence-v2")
 	writer.text(string(evaluated.runtime.manifestID))
 	writer.text(evaluated.runtime.fingerprint)
 	writer.text(workspace.ExecutionReviewFingerprint(evaluated.sources.Selection.Review))
@@ -183,6 +230,33 @@ func executionEvidenceDigest(evaluated *evaluation, intent ExecutionIntent) stri
 		writer.text(certificate.ChallengeName)
 		writer.text(certificate.ChallengeKind)
 		writer.text(certificate.ChallengeMode)
+	}
+	writer.integer(uint64(len(intent.CloudAccess)))
+	for _, access := range intent.CloudAccess {
+		writer.text(access.ChallengeName)
+		writer.text(access.Provider)
+		writer.text(access.AuthMode)
+		writer.integer(uint64(len(access.Files)))
+		for _, path := range access.Files {
+			writer.text(path)
+		}
+		writer.text(access.Helper)
+		writer.text(access.Metadata)
+	}
+	writer.integer(uint64(len(cloudEvidence)))
+	for _, evidence := range cloudEvidence {
+		writer.text(string(evidence.Role))
+		writer.text(evidence.Path)
+		writer.boolean(evidence.Exists)
+		writer.integer(evidence.Device)
+		writer.integer(evidence.Inode)
+		writer.integer(uint64(evidence.Mode))
+		writer.integer(uint64(evidence.UID))
+		writer.integer(uint64(evidence.GID))
+		writer.integer(evidence.NLink)
+		writer.integer(uint64(evidence.Size))
+		writer.text(canonicalTime(evidence.ModifiedAt))
+		writer.text(canonicalTime(evidence.ChangedAt))
 	}
 	return hex.EncodeToString(digest.Sum(nil))
 }

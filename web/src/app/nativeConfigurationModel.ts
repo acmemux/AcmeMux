@@ -60,6 +60,51 @@ export const managedFieldIds = {
   duckDnsPollingInterval: "provider.duckdns.polling_interval",
   duckDnsHttpTimeout: "provider.duckdns.http_timeout",
   duckDnsSequenceInterval: "provider.duckdns.sequence_interval",
+  azureEnvironment: "provider.azuredns.environment",
+  azureSubscriptionId: "provider.azuredns.subscription_id",
+  azureResourceGroup: "provider.azuredns.resource_group",
+  azureZoneName: "provider.azuredns.zone_name",
+  azurePrivateZone: "provider.azuredns.private_zone",
+  azureAuthMethod: "provider.azuredns.auth_method",
+  azureTenantId: "provider.azuredns.tenant_id",
+  azureClientId: "provider.azuredns.client_id",
+  azureClientSecret: "provider.azuredns.client_secret",
+  azureClientCertificatePath: "provider.azuredns.client_certificate_path",
+  azureClientCertificatePassword:
+    "provider.azuredns.client_certificate_password",
+  azureFederatedTokenFile: "provider.azuredns.federated_token_file",
+  azureMsiTimeout: "provider.azuredns.msi_timeout",
+  azureOidcToken: "provider.azuredns.oidc_token",
+  azureOidcTokenFile: "provider.azuredns.oidc_token_file",
+  azureOidcRequestUrl: "provider.azuredns.oidc_request_url",
+  azureOidcRequestToken: "provider.azuredns.oidc_request_token",
+  azureServiceConnectionId: "provider.azuredns.service_connection_id",
+  azureSystemAccessToken: "provider.azuredns.system_access_token",
+  azureSystemOidcRequestUri: "provider.azuredns.system_oidc_request_uri",
+  azureCliPath: "provider.azuredns.cli_path",
+  azureCliConfigDirectory: "provider.azuredns.cli_config_directory",
+  azureImdsEndpoint: "provider.azuredns.imds_endpoint",
+  azureIdentityEndpoint: "provider.azuredns.identity_endpoint",
+  azureTtl: "provider.azuredns.ttl",
+  azurePropagationTimeout: "provider.azuredns.propagation_timeout",
+  azurePollingInterval: "provider.azuredns.polling_interval",
+  awsAccessKeyId: "provider.route53.access_key_id",
+  awsSecretAccessKey: "provider.route53.secret_access_key",
+  awsSessionToken: "provider.route53.session_token",
+  awsRegion: "provider.route53.region",
+  awsHostedZoneId: "provider.route53.hosted_zone_id",
+  awsProfile: "provider.route53.profile",
+  awsSharedCredentialsFile: "provider.route53.shared_credentials_file",
+  awsSdkLoadConfig: "provider.route53.sdk_load_config",
+  awsEc2MetadataDisabled: "provider.route53.ec2_metadata_disabled",
+  awsAssumeRoleArn: "provider.route53.assume_role_arn",
+  awsExternalId: "provider.route53.external_id",
+  awsPrivateZone: "provider.route53.private_zone",
+  awsMaxRetries: "provider.route53.max_retries",
+  awsWaitForChanges: "provider.route53.wait_for_record_sets_changed",
+  awsTtl: "provider.route53.ttl",
+  awsPropagationTimeout: "provider.route53.propagation_timeout",
+  awsPollingInterval: "provider.route53.polling_interval",
 } as const;
 
 export type CAOption = {
@@ -170,7 +215,21 @@ export type AccountDraft = {
   eabPresent: boolean;
 };
 
-export type DNSProvider = "cloudflare" | "digitalocean" | "duckdns";
+export type DNSProvider =
+  "azuredns" | "cloudflare" | "digitalocean" | "duckdns" | "route53";
+export type CloudAuthMode =
+  | "azure_client_secret"
+  | "azure_client_certificate"
+  | "azure_workload"
+  | "azure_managed"
+  | "azure_cli"
+  | "azure_oidc_inline"
+  | "azure_oidc_file"
+  | "azure_oidc_request"
+  | "azure_pipeline"
+  | "aws_static"
+  | "aws_shared_profile"
+  | "aws_instance_role";
 
 export type ChallengeDraft = {
   name: string;
@@ -205,6 +264,10 @@ export type ChallengeDraft = {
   duckDnsToken: SecretDraft;
   duckDnsTokenPresent: boolean;
   providerSettings: Record<string, string>;
+  cloudAuthMode: CloudAuthMode;
+  originalCloudAuthMode: CloudAuthMode;
+  cloudSecrets: Record<string, SecretDraft>;
+  cloudSecretPresence: Record<string, boolean>;
 };
 
 export type CertificateDraft = {
@@ -475,6 +538,10 @@ function emptyDNSDraft() {
     duckDnsToken: { action: "keep" } as SecretDraft,
     duckDnsTokenPresent: false,
     providerSettings: {} as Record<string, string>,
+    cloudAuthMode: "azure_client_secret" as CloudAuthMode,
+    originalCloudAuthMode: "azure_client_secret" as CloudAuthMode,
+    cloudSecrets: {} as Record<string, SecretDraft>,
+    cloudSecretPresence: {} as Record<string, boolean>,
   };
 }
 
@@ -493,7 +560,227 @@ const providerSettingFieldIds = [
   managedFieldIds.duckDnsPollingInterval,
   managedFieldIds.duckDnsHttpTimeout,
   managedFieldIds.duckDnsSequenceInterval,
+  managedFieldIds.azureEnvironment,
+  managedFieldIds.azureSubscriptionId,
+  managedFieldIds.azureResourceGroup,
+  managedFieldIds.azureZoneName,
+  managedFieldIds.azurePrivateZone,
+  managedFieldIds.azureAuthMethod,
+  managedFieldIds.azureTenantId,
+  managedFieldIds.azureClientId,
+  managedFieldIds.azureClientCertificatePath,
+  managedFieldIds.azureFederatedTokenFile,
+  managedFieldIds.azureMsiTimeout,
+  managedFieldIds.azureOidcTokenFile,
+  managedFieldIds.azureOidcRequestUrl,
+  managedFieldIds.azureServiceConnectionId,
+  managedFieldIds.azureSystemOidcRequestUri,
+  managedFieldIds.azureCliPath,
+  managedFieldIds.azureCliConfigDirectory,
+  managedFieldIds.azureImdsEndpoint,
+  managedFieldIds.azureIdentityEndpoint,
+  managedFieldIds.azureTtl,
+  managedFieldIds.azurePropagationTimeout,
+  managedFieldIds.azurePollingInterval,
+  managedFieldIds.awsRegion,
+  managedFieldIds.awsHostedZoneId,
+  managedFieldIds.awsProfile,
+  managedFieldIds.awsSharedCredentialsFile,
+  managedFieldIds.awsSdkLoadConfig,
+  managedFieldIds.awsEc2MetadataDisabled,
+  managedFieldIds.awsAssumeRoleArn,
+  managedFieldIds.awsPrivateZone,
+  managedFieldIds.awsMaxRetries,
+  managedFieldIds.awsWaitForChanges,
+  managedFieldIds.awsTtl,
+  managedFieldIds.awsPropagationTimeout,
+  managedFieldIds.awsPollingInterval,
 ] as const;
+
+export const cloudSecretFieldIds = [
+  managedFieldIds.azureClientSecret,
+  managedFieldIds.azureClientCertificatePassword,
+  managedFieldIds.azureOidcToken,
+  managedFieldIds.azureOidcRequestToken,
+  managedFieldIds.azureSystemAccessToken,
+  managedFieldIds.awsAccessKeyId,
+  managedFieldIds.awsSecretAccessKey,
+  managedFieldIds.awsSessionToken,
+  managedFieldIds.awsExternalId,
+] as const;
+
+const cloudAlwaysPublicFields: Record<
+  "azuredns" | "route53",
+  readonly string[]
+> = {
+  azuredns: [
+    managedFieldIds.azureEnvironment,
+    managedFieldIds.azureSubscriptionId,
+    managedFieldIds.azureResourceGroup,
+    managedFieldIds.azureZoneName,
+    managedFieldIds.azurePrivateZone,
+    managedFieldIds.azureTtl,
+    managedFieldIds.azurePropagationTimeout,
+    managedFieldIds.azurePollingInterval,
+  ],
+  route53: [
+    managedFieldIds.awsRegion,
+    managedFieldIds.awsHostedZoneId,
+    managedFieldIds.awsSdkLoadConfig,
+    managedFieldIds.awsEc2MetadataDisabled,
+    managedFieldIds.awsAssumeRoleArn,
+    managedFieldIds.awsPrivateZone,
+    managedFieldIds.awsMaxRetries,
+    managedFieldIds.awsWaitForChanges,
+    managedFieldIds.awsTtl,
+    managedFieldIds.awsPropagationTimeout,
+    managedFieldIds.awsPollingInterval,
+  ],
+};
+
+const cloudModePublicFields: Record<CloudAuthMode, readonly string[]> = {
+  azure_client_secret: [
+    managedFieldIds.azureAuthMethod,
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+  ],
+  azure_client_certificate: [
+    managedFieldIds.azureAuthMethod,
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+    managedFieldIds.azureClientCertificatePath,
+  ],
+  azure_workload: [
+    managedFieldIds.azureAuthMethod,
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+    managedFieldIds.azureFederatedTokenFile,
+  ],
+  azure_managed: [
+    managedFieldIds.azureAuthMethod,
+    managedFieldIds.azureClientId,
+    managedFieldIds.azureMsiTimeout,
+    managedFieldIds.azureImdsEndpoint,
+    managedFieldIds.azureIdentityEndpoint,
+  ],
+  azure_cli: [
+    managedFieldIds.azureAuthMethod,
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureCliPath,
+    managedFieldIds.azureCliConfigDirectory,
+  ],
+  azure_oidc_inline: [
+    managedFieldIds.azureAuthMethod,
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+  ],
+  azure_oidc_file: [
+    managedFieldIds.azureAuthMethod,
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+    managedFieldIds.azureOidcTokenFile,
+  ],
+  azure_oidc_request: [
+    managedFieldIds.azureAuthMethod,
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+    managedFieldIds.azureOidcRequestUrl,
+  ],
+  azure_pipeline: [
+    managedFieldIds.azureAuthMethod,
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+    managedFieldIds.azureServiceConnectionId,
+    managedFieldIds.azureSystemOidcRequestUri,
+  ],
+  aws_static: [],
+  aws_shared_profile: [
+    managedFieldIds.awsProfile,
+    managedFieldIds.awsSharedCredentialsFile,
+  ],
+  aws_instance_role: [],
+};
+
+const cloudModeSecretFields: Record<CloudAuthMode, readonly string[]> = {
+  azure_client_secret: [managedFieldIds.azureClientSecret],
+  azure_client_certificate: [managedFieldIds.azureClientCertificatePassword],
+  azure_workload: [],
+  azure_managed: [],
+  azure_cli: [],
+  azure_oidc_inline: [managedFieldIds.azureOidcToken],
+  azure_oidc_file: [],
+  azure_oidc_request: [managedFieldIds.azureOidcRequestToken],
+  azure_pipeline: [managedFieldIds.azureSystemAccessToken],
+  aws_static: [
+    managedFieldIds.awsAccessKeyId,
+    managedFieldIds.awsSecretAccessKey,
+    managedFieldIds.awsSessionToken,
+    managedFieldIds.awsExternalId,
+  ],
+  aws_shared_profile: [managedFieldIds.awsExternalId],
+  aws_instance_role: [managedFieldIds.awsExternalId],
+};
+
+const cloudRequiredPublicFields: Record<CloudAuthMode, readonly string[]> = {
+  azure_client_secret: [
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+  ],
+  azure_client_certificate: [
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+    managedFieldIds.azureClientCertificatePath,
+  ],
+  azure_workload: [
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+    managedFieldIds.azureFederatedTokenFile,
+  ],
+  azure_managed: [],
+  azure_cli: [
+    managedFieldIds.azureCliPath,
+    managedFieldIds.azureCliConfigDirectory,
+  ],
+  azure_oidc_inline: [
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+  ],
+  azure_oidc_file: [
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+    managedFieldIds.azureOidcTokenFile,
+  ],
+  azure_oidc_request: [
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+    managedFieldIds.azureOidcRequestUrl,
+  ],
+  azure_pipeline: [
+    managedFieldIds.azureTenantId,
+    managedFieldIds.azureClientId,
+    managedFieldIds.azureServiceConnectionId,
+    managedFieldIds.azureSystemOidcRequestUri,
+  ],
+  aws_static: [],
+  aws_shared_profile: [
+    managedFieldIds.awsProfile,
+    managedFieldIds.awsSharedCredentialsFile,
+  ],
+  aws_instance_role: [],
+};
+
+const cloudRequiredSecretFields: Partial<
+  Record<CloudAuthMode, readonly string[]>
+> = {
+  azure_client_secret: [managedFieldIds.azureClientSecret],
+  azure_oidc_inline: [managedFieldIds.azureOidcToken],
+  azure_oidc_request: [managedFieldIds.azureOidcRequestToken],
+  azure_pipeline: [managedFieldIds.azureSystemAccessToken],
+  aws_static: [
+    managedFieldIds.awsAccessKeyId,
+    managedFieldIds.awsSecretAccessKey,
+  ],
+};
 
 function providerSettingsFromProjection(
   projection: ProjectedField[],
@@ -657,7 +944,7 @@ export function initialConfigurationDraft(
       "",
     );
     const provider = (
-      ["cloudflare", "digitalocean", "duckdns"] as const
+      ["azuredns", "cloudflare", "digitalocean", "duckdns", "route53"] as const
     ).includes(nativeProvider as DNSProvider)
       ? (nativeProvider as DNSProvider)
       : "cloudflare";
@@ -709,6 +996,56 @@ export function initialConfigurationDraft(
     );
     const cloudflareAuthMode =
       cloudflareEmail || cloudflareApiKeyPresent ? "legacy" : "token";
+    let cloudAuthMode: CloudAuthMode = "azure_client_secret";
+    const azureMethod = stringValue(
+      projection,
+      managedFieldIds.azureAuthMethod,
+      bindings,
+      "env",
+    );
+    if (provider === "azuredns") {
+      if (azureMethod === "wli") cloudAuthMode = "azure_workload";
+      else if (azureMethod === "msi") cloudAuthMode = "azure_managed";
+      else if (azureMethod === "cli") cloudAuthMode = "azure_cli";
+      else if (azureMethod === "pipeline") cloudAuthMode = "azure_pipeline";
+      else if (azureMethod === "oidc") {
+        cloudAuthMode = stringValue(
+          projection,
+          managedFieldIds.azureOidcTokenFile,
+          bindings,
+          "",
+        )
+          ? "azure_oidc_file"
+          : stringValue(
+                projection,
+                managedFieldIds.azureOidcRequestUrl,
+                bindings,
+                "",
+              )
+            ? "azure_oidc_request"
+            : "azure_oidc_inline";
+      } else if (
+        stringValue(
+          projection,
+          managedFieldIds.azureClientCertificatePath,
+          bindings,
+          "",
+        )
+      ) {
+        cloudAuthMode = "azure_client_certificate";
+      }
+    } else if (provider === "route53") {
+      cloudAuthMode = stringValue(
+        projection,
+        managedFieldIds.awsProfile,
+        bindings,
+        "",
+      )
+        ? "aws_shared_profile"
+        : secretPresent(projection, [managedFieldIds.awsAccessKeyId], bindings)
+          ? "aws_static"
+          : "aws_instance_role";
+    }
     return {
       name,
       isNew: false,
@@ -788,6 +1125,20 @@ export function initialConfigurationDraft(
         bindings,
       ),
       providerSettings: providerSettingsFromProjection(projection, bindings),
+      cloudAuthMode,
+      originalCloudAuthMode: cloudAuthMode,
+      cloudSecrets: Object.fromEntries(
+        cloudSecretFieldIds.map((fieldId) => [
+          fieldId,
+          { action: "keep" } as SecretDraft,
+        ]),
+      ),
+      cloudSecretPresence: Object.fromEntries(
+        cloudSecretFieldIds.map((fieldId) => [
+          fieldId,
+          secretPresent(projection, [fieldId], bindings),
+        ]),
+      ),
     };
   });
   const certificates = certificateNames.map<CertificateDraft>((name) => {
@@ -1299,14 +1650,35 @@ export function changesFromDraft(
       );
       for (const fieldId of providerSettingFieldIds) {
         if (!fieldId.includes(`provider.${challenge.provider}`)) continue;
-        emitOptional(
-          changes,
-          projection,
-          fieldId,
-          bindings,
-          challenge.providerSettings[fieldId] ?? "",
-          "",
-        );
+        if (
+          challenge.provider === "azuredns" ||
+          challenge.provider === "route53"
+        ) {
+          const allowed = new Set([
+            ...cloudAlwaysPublicFields[challenge.provider],
+            ...cloudModePublicFields[challenge.cloudAuthMode],
+          ]);
+          if (!allowed.has(fieldId))
+            emitRemovalIfPresent(changes, projection, fieldId, bindings);
+          else
+            emitOptional(
+              changes,
+              projection,
+              fieldId,
+              bindings,
+              challenge.providerSettings[fieldId] ?? "",
+              "",
+            );
+        } else {
+          emitOptional(
+            changes,
+            projection,
+            fieldId,
+            bindings,
+            challenge.providerSettings[fieldId] ?? "",
+            "",
+          );
+        }
       }
       if (challenge.provider === "cloudflare") {
         if (
@@ -1389,7 +1761,7 @@ export function changesFromDraft(
           challenge.digitalOceanToken,
           challenge.digitalOceanTokenPresent,
         );
-      } else {
+      } else if (challenge.provider === "duckdns") {
         emitSecretDraft(
           changes,
           projection,
@@ -1399,6 +1771,23 @@ export function changesFromDraft(
           challenge.duckDnsToken,
           challenge.duckDnsTokenPresent,
         );
+      } else {
+        const allowed = new Set(cloudModeSecretFields[challenge.cloudAuthMode]);
+        for (const fieldId of cloudSecretFieldIds) {
+          if (!fieldId.includes(`provider.${challenge.provider}`)) continue;
+          if (!allowed.has(fieldId))
+            emitRemovalIfPresent(changes, projection, fieldId, bindings);
+          else
+            emitSecretDraft(
+              changes,
+              projection,
+              fieldId,
+              [],
+              bindings,
+              challenge.cloudSecrets[fieldId] ?? { action: "keep" },
+              challenge.cloudSecretPresence[fieldId] ?? false,
+            );
+        }
       }
       continue;
     }
@@ -1989,10 +2378,79 @@ export function validateDraft(draft: NativeConfigurationDraft): DraftIssue[] {
           message: "Provide the write-only DuckDNS account token.",
         });
       }
+      if (
+        challenge.provider === "azuredns" ||
+        challenge.provider === "route53"
+      ) {
+        const requiredAlways =
+          challenge.provider === "azuredns"
+            ? [
+                managedFieldIds.azureEnvironment,
+                managedFieldIds.azureSubscriptionId,
+                managedFieldIds.azureResourceGroup,
+                managedFieldIds.azurePrivateZone,
+                managedFieldIds.azureAuthMethod,
+              ]
+            : [
+                managedFieldIds.awsRegion,
+                managedFieldIds.awsSdkLoadConfig,
+                managedFieldIds.awsEc2MetadataDisabled,
+              ];
+        for (const fieldId of [
+          ...requiredAlways,
+          ...cloudRequiredPublicFields[challenge.cloudAuthMode],
+        ]) {
+          if (!(challenge.providerSettings[fieldId] ?? "")) {
+            issues.push({
+              fieldId: `challenge-${index}-${fieldId.replaceAll(".", "-")}`,
+              message:
+                "This field is required for the selected cloud authentication mode.",
+            });
+          }
+        }
+        for (const fieldId of cloudRequiredSecretFields[
+          challenge.cloudAuthMode
+        ] ?? []) {
+          if (
+            !secretAvailable(
+              challenge.cloudSecrets[fieldId] ?? { action: "keep" },
+              challenge.cloudSecretPresence[fieldId] ?? false,
+            )
+          ) {
+            issues.push({
+              fieldId: `challenge-${index}-${fieldId.replaceAll(".", "-")}-replacement`,
+              message:
+                "Provide this write-only credential for the selected cloud authentication mode.",
+            });
+          }
+        }
+        const absolutePathFields = [
+          managedFieldIds.azureClientCertificatePath,
+          managedFieldIds.azureFederatedTokenFile,
+          managedFieldIds.azureOidcTokenFile,
+          managedFieldIds.azureCliPath,
+          managedFieldIds.azureCliConfigDirectory,
+          managedFieldIds.awsSharedCredentialsFile,
+        ];
+        for (const fieldId of absolutePathFields) {
+          const value = challenge.providerSettings[fieldId];
+          if (value && !value.startsWith("/"))
+            issues.push({
+              fieldId: `challenge-${index}-${fieldId.replaceAll(".", "-")}`,
+              message:
+                "Cloud credential and helper paths must be canonical absolute paths.",
+            });
+        }
+      }
       for (const [fieldId, value] of Object.entries(
         challenge.providerSettings,
       )) {
         if (!value) continue;
+        if (
+          challenge.provider === "azuredns" ||
+          challenge.provider === "route53"
+        )
+          continue;
         const numeric =
           !fieldId.endsWith("base_url") && !fieldId.endsWith("api_url");
         if (
