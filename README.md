@@ -4,13 +4,15 @@ AcmeMux is a graphical control plane for one existing [lego](https://go-acme.git
 
 ## Project status
 
-AcmeMux is pre-release software. The current build supports Linux amd64 and only the exact lego executables listed in [runtime compatibility](docs/runtime-compatibility.md). A packaged installer and systemd unit are not yet available, so evaluation currently requires a source build and an administrator-managed service process.
+AcmeMux is pre-release software. The qualified deployment is a source build on Debian 13 amd64 under the supplied systemd service, using only the exact lego executables listed in [runtime compatibility](docs/runtime-compatibility.md). Passing on another Linux distribution or architecture does not imply support.
+
+AcmeMux does not publish Debian, RPM, package-repository, or container artifacts. Operating-system packages remain roadmap work and can be prioritized in response to operator demand.
 
 Do not treat the current branch as a stable release or expose it directly to the internet. AcmeMux must listen on loopback behind an HTTPS reverse proxy.
 
 ## Install
 
-The current source installation requires Go 1.26.6, Node.js 20.19.2, npm 9.2.0, GNU Make, and a supported lego executable. Follow the [installation guide](docs/installation.md) to build the single AcmeMux executable, create its state directory, configure HTTPS, and start it under a dedicated non-root account.
+The source installation requires Go 1.26.6, Node.js 20.19.2, npm 9.2.0, GNU Make, and a supported lego executable. Follow the [installation guide](docs/installation.md) to produce and verify the single executable, install the hardened systemd service, configure HTTPS, and run it under a dedicated or compatible existing non-root account.
 
 ## First setup
 

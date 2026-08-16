@@ -24,6 +24,7 @@ import (
 	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
 	"github.com/sgurden-certleap/AcmeMux/internal/scheduler"
 	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/sgurden-certleap/AcmeMux/internal/supervisor"
 	"github.com/sgurden-certleap/AcmeMux/internal/webassets"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
@@ -209,37 +210,50 @@ func runServer(arguments []string) error {
 		schedulerErrors <- automaticScheduler.Run(workerContext)
 	}()
 
-	logger := log.New(os.Stderr, "acmemux: ", log.LstdFlags)
-	logger.Printf("listening on %s for public origin %s", listener.Addr(), config.PublicOrigin)
-
 	stopContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	logger := log.New(os.Stderr, "acmemux: ", log.LstdFlags)
 	var result error
 	serveFinished := false
 	workerFinished := false
 	schedulerFinished := false
+	startupComplete := false
 	select {
+	case <-automaticScheduler.Ready():
+		if err := supervisor.NotifyReady(); err != nil {
+			result = fmt.Errorf("notify service readiness: %w", err)
+		} else {
+			startupComplete = true
+			logger.Printf("ready on %s for public origin %s", listener.Addr(), config.PublicOrigin)
+		}
 	case err = <-serveErrors:
 		serveFinished = true
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			result = fmt.Errorf("serve HTTP: %w", err)
-		}
+		result = lifecycleError("HTTP server", err, http.ErrServerClosed)
 	case err = <-workerErrors:
 		workerFinished = true
-		if err == nil {
-			result = errors.New("native operation worker stopped unexpectedly")
-		} else {
-			result = fmt.Errorf("run native operation worker: %w", err)
-		}
+		result = lifecycleError("native operation worker", err, nil)
 	case err = <-schedulerErrors:
 		schedulerFinished = true
-		if err == nil {
-			result = errors.New("automatic renewal scheduler stopped unexpectedly")
-		} else {
-			result = fmt.Errorf("run automatic renewal scheduler: %w", err)
-		}
+		result = lifecycleError("automatic renewal scheduler", err, nil)
 	case <-stopContext.Done():
+	}
+	if startupComplete {
+		select {
+		case err = <-serveErrors:
+			serveFinished = true
+			result = lifecycleError("HTTP server", err, http.ErrServerClosed)
+		case err = <-workerErrors:
+			workerFinished = true
+			result = lifecycleError("native operation worker", err, nil)
+		case err = <-schedulerErrors:
+			schedulerFinished = true
+			result = lifecycleError("automatic renewal scheduler", err, nil)
+		case <-stopContext.Done():
+		}
+	}
+	if notifyErr := supervisor.NotifyStopping(); notifyErr != nil {
+		result = errors.Join(result, fmt.Errorf("notify service shutdown: %w", notifyErr))
 	}
 	stopWorkers()
 	shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -278,6 +292,13 @@ func runServer(arguments []string) error {
 		}
 	}
 	return result
+}
+
+func lifecycleError(component string, err error, expected error) error {
+	if err == nil || (expected != nil && errors.Is(err, expected)) {
+		return fmt.Errorf("%s stopped unexpectedly", component)
+	}
+	return fmt.Errorf("run %s: %w", component, err)
 }
 
 func newApplicationHTTPServer(address string, handler http.Handler) *http.Server {

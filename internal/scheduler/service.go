@@ -41,6 +41,8 @@ type Service struct {
 	operations Operations
 	clock      Clock
 	wake       chan struct{}
+	ready      chan struct{}
+	readyOnce  sync.Once
 	mu         sync.Mutex
 }
 
@@ -55,7 +57,10 @@ func New(database Database, operations Operations, clock Clock) (*Service, error
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: store, operations: operations, clock: clock, wake: make(chan struct{}, 1)}, nil
+	return &Service{
+		store: store, operations: operations, clock: clock,
+		wake: make(chan struct{}, 1), ready: make(chan struct{}),
+	}, nil
 }
 
 func (service *Service) Get(ctx context.Context) (Schedule, error) {
@@ -102,6 +107,7 @@ func (service *Service) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	service.readyOnce.Do(func() { close(service.ready) })
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -126,6 +132,14 @@ func (service *Service) Run(ctx context.Context) error {
 		case <-service.clock.After(delay):
 		}
 	}
+}
+
+// Ready closes after operation and scheduler startup recovery are complete.
+func (service *Service) Ready() <-chan struct{} {
+	if service == nil || service.ready == nil {
+		return nil
+	}
+	return service.ready
 }
 
 func (service *Service) evaluate(ctx context.Context) error {
