@@ -9,6 +9,39 @@ import (
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
 
+const coreDNSServiceTestConfiguration = `storage: .lego
+accounts:
+  home:
+    server: letsencrypt
+    email: admin@example.com
+    keyType: EC256
+    acceptsTermsOfService: true
+challenges:
+  dns-home:
+    dns:
+      provider: cloudflare
+      dnsTimeout: 30
+      resolvers: [1.1.1.1:53]
+      envFile: .cloudflare.env
+      propagation:
+        disableAuthoritativeNameservers: false
+        disableRecursiveNameservers: false
+        wait: 0s
+certificates:
+  wildcard:
+    domains: ["*.home.example", home.example]
+    keyType: EC256
+    account: home
+    challenge: dns-home
+    renew:
+      days: 0
+      reuseKey: false
+      disableRandomSleep: false
+      ari:
+        disable: false
+        waitToRenewDuration: 0s
+`
+
 func executionTestTransactions(t *testing.T) *fakeTransactions {
 	t.Helper()
 	directory := t.TempDir()
@@ -71,6 +104,43 @@ func TestPrepareExecutionBuildsSafeWholeWorkspaceIntentAndOwnsSecrets(t *testing
 		if value != 0 {
 			t.Fatal("ExecutionPlan.Close did not clear a secret buffer")
 		}
+	}
+}
+
+func TestPrepareExecutionBuildsDNSIntentThroughTheSameBroker(t *testing.T) {
+	directory := t.TempDir()
+	const token = "task09-execution-secret-canary"
+	transactions := &fakeTransactions{
+		workingDirectory:  directory,
+		configurationPath: filepath.Join(directory, ".lego.yml"),
+		dotenvPath:        filepath.Join(directory, ".cloudflare.env"),
+		configuration:     []byte(coreDNSServiceTestConfiguration),
+		dotenv:            []byte("CLOUDFLARE_DNS_API_TOKEN='" + token + "'\n"),
+		generation:        1,
+	}
+	service := newTestService(t, transactions, nil, 0x6d)
+	lease, err := service.coordinator.TryAcquire(context.Background(), workspace.PurposeManualRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, prepareErr := service.PrepareExecution(context.Background(), lease)
+	if releaseErr := lease.Release(); releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
+	if prepareErr != nil {
+		t.Fatal(prepareErr)
+	}
+	defer plan.Close()
+	if len(plan.Intent.Certificates) != 1 {
+		t.Fatalf("certificates = %#v", plan.Intent.Certificates)
+	}
+	certificate := plan.Intent.Certificates[0]
+	if certificate.ChallengeName != "dns-home" || certificate.ChallengeKind != "dns-01" ||
+		certificate.ChallengeMode != "cloudflare" {
+		t.Fatalf("DNS certificate intent = %#v", certificate)
+	}
+	if len(plan.ObservedSecrets) != 1 || string(plan.ObservedSecrets[0]) != token {
+		t.Fatalf("observed DNS secrets = %#v", plan.ObservedSecrets)
 	}
 }
 

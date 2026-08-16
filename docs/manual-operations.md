@@ -69,7 +69,7 @@ file-mode process contract is:
 | Arguments | Exactly `--config <absolute-native-configuration-path>` |
 | Working directory | The adopted effective working directory |
 | Broker environment | `LANG=C`, `LC_ALL=C`, `TZ=UTC`, and one per-operation random `ACMEMUX_BROKER_PROCESS_GUARD_<hex>=1` lineage marker |
-| Additional environment | Only exact variables supplied by trusted supported-integration code; the current HTTP-01 operation supplies none |
+| Additional environment | No inherited provider credentials; supported DNS-01 credentials are loaded by upstream `lego` from the exact reviewed native `envFile` |
 | Standard input | Not connected |
 | Concurrency | One shared workspace lease across preflight, process execution, and reconciliation |
 | Runtime limit | 1,800 seconds |
@@ -163,5 +163,6 @@ into application-owned persistence.
 
 See `runtime-compatibility.md`, `workspace-adoption.md`, and
 `native-configuration.md` for the prerequisites that can block a preview or
-run. See `ca-certificate-http.md` for the native account, certificate,
-renewal, and HTTP-01 fields evaluated by this operation.
+run. See `ca-certificate-http.md` for the native account, certificate, renewal,
+and HTTP-01 fields evaluated by this operation. See `dns-providers.md` for the
+curated DNS-01 credential and provider boundary.

@@ -27,6 +27,39 @@ export const managedFieldIds = {
   challengeDelay: "challenge.http.delay",
   challengeProxyHeader: "challenge.http.proxy_header",
   challengeWebroot: "challenge.http.webroot",
+  challengeDnsProvider: "challenge.dns.provider",
+  challengeDnsTimeout: "challenge.dns.dns_timeout",
+  challengeDnsResolvers: "challenge.dns.resolvers",
+  challengeDnsEnvFile: "challenge.dns.env_file",
+  challengeDnsDisableAuthoritative:
+    "challenge.dns.propagation.disable_authoritative_nameservers",
+  challengeDnsDisableRecursive:
+    "challenge.dns.propagation.disable_recursive_nameservers",
+  challengeDnsPropagationWait: "challenge.dns.propagation.wait",
+  cloudflareEmail: "provider.cloudflare.email",
+  cloudflareApiKey: "provider.cloudflare.api_key",
+  cloudflareDnsToken: "provider.cloudflare.dns_api_token",
+  cloudflareZoneToken: "provider.cloudflare.zone_api_token",
+  cloudflareEmailAlias: "provider.cloudflare.email_alias",
+  cloudflareApiKeyAlias: "provider.cloudflare.api_key_alias",
+  cloudflareDnsTokenAlias: "provider.cloudflare.dns_api_token_alias",
+  cloudflareZoneTokenAlias: "provider.cloudflare.zone_api_token_alias",
+  cloudflareBaseUrl: "provider.cloudflare.base_url",
+  cloudflareTtl: "provider.cloudflare.ttl",
+  cloudflarePropagationTimeout: "provider.cloudflare.propagation_timeout",
+  cloudflarePollingInterval: "provider.cloudflare.polling_interval",
+  cloudflareHttpTimeout: "provider.cloudflare.http_timeout",
+  digitalOceanToken: "provider.digitalocean.auth_token",
+  digitalOceanApiUrl: "provider.digitalocean.api_url",
+  digitalOceanTtl: "provider.digitalocean.ttl",
+  digitalOceanPropagationTimeout: "provider.digitalocean.propagation_timeout",
+  digitalOceanPollingInterval: "provider.digitalocean.polling_interval",
+  digitalOceanHttpTimeout: "provider.digitalocean.http_timeout",
+  duckDnsToken: "provider.duckdns.token",
+  duckDnsPropagationTimeout: "provider.duckdns.propagation_timeout",
+  duckDnsPollingInterval: "provider.duckdns.polling_interval",
+  duckDnsHttpTimeout: "provider.duckdns.http_timeout",
+  duckDnsSequenceInterval: "provider.duckdns.sequence_interval",
 } as const;
 
 export type CAOption = {
@@ -137,15 +170,41 @@ export type AccountDraft = {
   eabPresent: boolean;
 };
 
-export type HTTPChallengeDraft = {
+export type DNSProvider = "cloudflare" | "digitalocean" | "duckdns";
+
+export type ChallengeDraft = {
   name: string;
   isNew: boolean;
   predefined: boolean;
+  kind: "http" | "dns";
   mode: "listener" | "webroot";
   address: string;
   delay: string;
   proxyHeader: string;
   webroot: string;
+  provider: DNSProvider;
+  originalProvider: DNSProvider;
+  envFile: string;
+  dnsTimeout: number;
+  resolvers: string[];
+  disableAuthoritative: boolean;
+  disableRecursive: boolean;
+  propagationWait: string;
+  cloudflareAuthMode: "token" | "legacy";
+  originalCloudflareAuthMode: "token" | "legacy";
+  cloudflareEmail: string;
+  originalCloudflareEmail: string;
+  cloudflareApiKey: SecretDraft;
+  cloudflareApiKeyPresent: boolean;
+  cloudflareDnsToken: SecretDraft;
+  cloudflareDnsTokenPresent: boolean;
+  cloudflareZoneToken: SecretDraft;
+  cloudflareZoneTokenPresent: boolean;
+  digitalOceanToken: SecretDraft;
+  digitalOceanTokenPresent: boolean;
+  duckDnsToken: SecretDraft;
+  duckDnsTokenPresent: boolean;
+  providerSettings: Record<string, string>;
 };
 
 export type CertificateDraft = {
@@ -167,7 +226,7 @@ export type NativeConfigurationDraft = {
   creation: boolean;
   storage: string;
   accounts: AccountDraft[];
-  challenges: HTTPChallengeDraft[];
+  challenges: ChallengeDraft[];
   certificates: CertificateDraft[];
   unsupportedFields: UnsupportedDraftField[];
 };
@@ -350,6 +409,104 @@ function acceptedKeyType(value: string): SupportedKeyType | "" {
     : "";
 }
 
+function secretPresent(
+  projection: ProjectedField[],
+  fieldIds: readonly string[],
+  bindings: ConfigurationBinding[],
+): boolean {
+  return fieldIds.some((fieldId) => {
+    const field = fieldFor(projection, fieldId, bindings);
+    return Boolean(field?.presenceKnown && field.present);
+  });
+}
+
+export function newHTTPChallenge(name: string): ChallengeDraft {
+  return {
+    name,
+    isNew: true,
+    predefined: false,
+    kind: "http",
+    mode: "listener",
+    address: ":8080",
+    delay: "0s",
+    proxyHeader: "Host",
+    webroot: "",
+    ...emptyDNSDraft(),
+  };
+}
+
+export function newDNSChallenge(name: string): ChallengeDraft {
+  return {
+    name,
+    isNew: true,
+    predefined: false,
+    kind: "dns",
+    mode: "listener",
+    address: ":8080",
+    delay: "0s",
+    proxyHeader: "Host",
+    webroot: "",
+    ...emptyDNSDraft(),
+  };
+}
+
+function emptyDNSDraft() {
+  return {
+    provider: "cloudflare" as DNSProvider,
+    originalProvider: "cloudflare" as DNSProvider,
+    envFile: ".cloudflare.env",
+    dnsTimeout: 30,
+    resolvers: [] as string[],
+    disableAuthoritative: false,
+    disableRecursive: false,
+    propagationWait: "0s",
+    cloudflareAuthMode: "token" as const,
+    originalCloudflareAuthMode: "token" as const,
+    cloudflareEmail: "",
+    originalCloudflareEmail: "",
+    cloudflareApiKey: { action: "keep" } as SecretDraft,
+    cloudflareApiKeyPresent: false,
+    cloudflareDnsToken: { action: "keep" } as SecretDraft,
+    cloudflareDnsTokenPresent: false,
+    cloudflareZoneToken: { action: "keep" } as SecretDraft,
+    cloudflareZoneTokenPresent: false,
+    digitalOceanToken: { action: "keep" } as SecretDraft,
+    digitalOceanTokenPresent: false,
+    duckDnsToken: { action: "keep" } as SecretDraft,
+    duckDnsTokenPresent: false,
+    providerSettings: {} as Record<string, string>,
+  };
+}
+
+const providerSettingFieldIds = [
+  managedFieldIds.cloudflareBaseUrl,
+  managedFieldIds.cloudflareTtl,
+  managedFieldIds.cloudflarePropagationTimeout,
+  managedFieldIds.cloudflarePollingInterval,
+  managedFieldIds.cloudflareHttpTimeout,
+  managedFieldIds.digitalOceanApiUrl,
+  managedFieldIds.digitalOceanTtl,
+  managedFieldIds.digitalOceanPropagationTimeout,
+  managedFieldIds.digitalOceanPollingInterval,
+  managedFieldIds.digitalOceanHttpTimeout,
+  managedFieldIds.duckDnsPropagationTimeout,
+  managedFieldIds.duckDnsPollingInterval,
+  managedFieldIds.duckDnsHttpTimeout,
+  managedFieldIds.duckDnsSequenceInterval,
+] as const;
+
+function providerSettingsFromProjection(
+  projection: ProjectedField[],
+  bindings: ConfigurationBinding[],
+): Record<string, string> {
+  return Object.fromEntries(
+    providerSettingFieldIds.map((fieldId) => [
+      fieldId,
+      stringValue(projection, fieldId, bindings, ""),
+    ]),
+  );
+}
+
 export function initialConfigurationDraft(
   projection: ProjectedField[],
   creation = false,
@@ -373,18 +530,7 @@ export function initialConfigurationDraft(
           eabPresent: false,
         },
       ],
-      challenges: [
-        {
-          name: "http-home",
-          isNew: true,
-          predefined: false,
-          mode: "listener",
-          address: ":80",
-          delay: "0s",
-          proxyHeader: "Host",
-          webroot: "",
-        },
-      ],
+      challenges: [{ ...newHTTPChallenge("http-home"), address: ":80" }],
       certificates: [
         {
           name: "home",
@@ -502,8 +648,19 @@ export function initialConfigurationDraft(
       eabPresent: Boolean(hmac?.presenceKnown && hmac.present),
     };
   });
-  const challenges = challengeNames.map<HTTPChallengeDraft>((name) => {
+  const challenges = challengeNames.map<ChallengeDraft>((name) => {
     const bindings = bindingsFor("challenge", name);
+    const nativeProvider = stringValue(
+      projection,
+      managedFieldIds.challengeDnsProvider,
+      bindings,
+      "",
+    );
+    const provider = (
+      ["cloudflare", "digitalocean", "duckdns"] as const
+    ).includes(nativeProvider as DNSProvider)
+      ? (nativeProvider as DNSProvider)
+      : "cloudflare";
     const webroot = stringValue(
       projection,
       managedFieldIds.challengeWebroot,
@@ -515,10 +672,48 @@ export function initialConfigurationDraft(
       !projection.some(
         (field) => bindingValue(field, "challenge") === name && field.present,
       );
+    const dnsDraft = emptyDNSDraft();
+    const canonicalEmail = stringValue(
+      projection,
+      managedFieldIds.cloudflareEmail,
+      bindings,
+      "",
+    );
+    const aliasEmail = stringValue(
+      projection,
+      managedFieldIds.cloudflareEmailAlias,
+      bindings,
+      "",
+    );
+    const cloudflareEmail = canonicalEmail || aliasEmail;
+    const cloudflareApiKeyPresent = secretPresent(
+      projection,
+      [managedFieldIds.cloudflareApiKey, managedFieldIds.cloudflareApiKeyAlias],
+      bindings,
+    );
+    const cloudflareDnsTokenPresent = secretPresent(
+      projection,
+      [
+        managedFieldIds.cloudflareDnsToken,
+        managedFieldIds.cloudflareDnsTokenAlias,
+      ],
+      bindings,
+    );
+    const cloudflareZoneTokenPresent = secretPresent(
+      projection,
+      [
+        managedFieldIds.cloudflareZoneToken,
+        managedFieldIds.cloudflareZoneTokenAlias,
+      ],
+      bindings,
+    );
+    const cloudflareAuthMode =
+      cloudflareEmail || cloudflareApiKeyPresent ? "legacy" : "token";
     return {
       name,
       isNew: false,
       predefined,
+      kind: nativeProvider ? "dns" : "http",
       mode: webroot ? "webroot" : "listener",
       address: stringValue(
         projection,
@@ -539,6 +734,60 @@ export function initialConfigurationDraft(
         "Host",
       ),
       webroot,
+      ...dnsDraft,
+      provider,
+      originalProvider: provider,
+      envFile: stringValue(
+        projection,
+        managedFieldIds.challengeDnsEnvFile,
+        bindings,
+        `.${provider}.env`,
+      ),
+      dnsTimeout: integerValue(
+        projection,
+        managedFieldIds.challengeDnsTimeout,
+        bindings,
+        30,
+      ),
+      resolvers: listValue(
+        projection,
+        managedFieldIds.challengeDnsResolvers,
+        bindings,
+      ),
+      disableAuthoritative: booleanValue(
+        projection,
+        managedFieldIds.challengeDnsDisableAuthoritative,
+        bindings,
+      ),
+      disableRecursive: booleanValue(
+        projection,
+        managedFieldIds.challengeDnsDisableRecursive,
+        bindings,
+      ),
+      propagationWait: stringValue(
+        projection,
+        managedFieldIds.challengeDnsPropagationWait,
+        bindings,
+        "0s",
+      ),
+      cloudflareAuthMode,
+      originalCloudflareAuthMode: cloudflareAuthMode,
+      cloudflareEmail,
+      originalCloudflareEmail: cloudflareEmail,
+      cloudflareApiKeyPresent,
+      cloudflareDnsTokenPresent,
+      cloudflareZoneTokenPresent,
+      digitalOceanTokenPresent: secretPresent(
+        projection,
+        [managedFieldIds.digitalOceanToken],
+        bindings,
+      ),
+      duckDnsTokenPresent: secretPresent(
+        projection,
+        [managedFieldIds.duckDnsToken],
+        bindings,
+      ),
+      providerSettings: providerSettingsFromProjection(projection, bindings),
     };
   });
   const certificates = certificateNames.map<CertificateDraft>((name) => {
@@ -836,6 +1085,33 @@ function emitRemovalIfPresent(
   }
 }
 
+function emitSecretDraft(
+  changes: ConfigurationChange[],
+  projection: ProjectedField[],
+  primaryFieldId: string,
+  aliasFieldIds: readonly string[],
+  bindings: ConfigurationBinding[],
+  draft: SecretDraft,
+  present: boolean,
+) {
+  const all = [primaryFieldId, ...aliasFieldIds];
+  if (draft.action === "replace") {
+    changes.push({
+      fieldId: primaryFieldId,
+      bindings,
+      operation: "set",
+      value: draft.secret,
+    });
+    for (const fieldId of aliasFieldIds) {
+      emitRemovalIfPresent(changes, projection, fieldId, bindings);
+    }
+  } else if (draft.action === "remove" && present) {
+    for (const fieldId of all) {
+      emitRemovalIfPresent(changes, projection, fieldId, bindings);
+    }
+  }
+}
+
 export function changesFromDraft(
   draft: NativeConfigurationDraft,
   projection: ProjectedField[],
@@ -958,6 +1234,174 @@ export function changesFromDraft(
   for (const challenge of draft.challenges) {
     const bindings = bindingsFor("challenge", challenge.name);
     const force = creation || challenge.isNew || challenge.predefined;
+    if (challenge.kind === "dns") {
+      emitValue(
+        changes,
+        projection,
+        managedFieldIds.challengeDnsProvider,
+        bindings,
+        challenge.provider,
+        undefined,
+        force,
+      );
+      emitValue(
+        changes,
+        projection,
+        managedFieldIds.challengeDnsEnvFile,
+        bindings,
+        challenge.envFile,
+        undefined,
+        force,
+      );
+      emitOptionalOrRequired(
+        changes,
+        projection,
+        managedFieldIds.challengeDnsTimeout,
+        bindings,
+        challenge.dnsTimeout,
+        0,
+        force,
+      );
+      emitOptional(
+        changes,
+        projection,
+        managedFieldIds.challengeDnsResolvers,
+        bindings,
+        challenge.resolvers,
+        [],
+      );
+      emitOptionalOrRequired(
+        changes,
+        projection,
+        managedFieldIds.challengeDnsDisableAuthoritative,
+        bindings,
+        challenge.disableAuthoritative,
+        false,
+        force,
+      );
+      emitOptionalOrRequired(
+        changes,
+        projection,
+        managedFieldIds.challengeDnsDisableRecursive,
+        bindings,
+        challenge.disableRecursive,
+        false,
+        force,
+      );
+      emitOptionalOrRequired(
+        changes,
+        projection,
+        managedFieldIds.challengeDnsPropagationWait,
+        bindings,
+        challenge.propagationWait,
+        "0s",
+        force,
+      );
+      for (const fieldId of providerSettingFieldIds) {
+        if (!fieldId.includes(`provider.${challenge.provider}`)) continue;
+        emitOptional(
+          changes,
+          projection,
+          fieldId,
+          bindings,
+          challenge.providerSettings[fieldId] ?? "",
+          "",
+        );
+      }
+      if (challenge.provider === "cloudflare") {
+        if (
+          challenge.cloudflareAuthMode !== challenge.originalCloudflareAuthMode
+        ) {
+          const obsolete =
+            challenge.cloudflareAuthMode === "legacy"
+              ? [
+                  managedFieldIds.cloudflareDnsToken,
+                  managedFieldIds.cloudflareDnsTokenAlias,
+                  managedFieldIds.cloudflareZoneToken,
+                  managedFieldIds.cloudflareZoneTokenAlias,
+                ]
+              : [
+                  managedFieldIds.cloudflareEmail,
+                  managedFieldIds.cloudflareEmailAlias,
+                  managedFieldIds.cloudflareApiKey,
+                  managedFieldIds.cloudflareApiKeyAlias,
+                ];
+          for (const fieldId of obsolete) {
+            emitRemovalIfPresent(changes, projection, fieldId, bindings);
+          }
+        }
+        if (
+          challenge.cloudflareAuthMode === "legacy" &&
+          (challenge.isNew ||
+            challenge.cloudflareEmail !== challenge.originalCloudflareEmail ||
+            challenge.cloudflareAuthMode !==
+              challenge.originalCloudflareAuthMode)
+        ) {
+          emitOptional(
+            changes,
+            projection,
+            managedFieldIds.cloudflareEmail,
+            bindings,
+            challenge.cloudflareEmail,
+            "",
+          );
+          emitRemovalIfPresent(
+            changes,
+            projection,
+            managedFieldIds.cloudflareEmailAlias,
+            bindings,
+          );
+        }
+        emitSecretDraft(
+          changes,
+          projection,
+          managedFieldIds.cloudflareApiKey,
+          [managedFieldIds.cloudflareApiKeyAlias],
+          bindings,
+          challenge.cloudflareApiKey,
+          challenge.cloudflareApiKeyPresent,
+        );
+        emitSecretDraft(
+          changes,
+          projection,
+          managedFieldIds.cloudflareDnsToken,
+          [managedFieldIds.cloudflareDnsTokenAlias],
+          bindings,
+          challenge.cloudflareDnsToken,
+          challenge.cloudflareDnsTokenPresent,
+        );
+        emitSecretDraft(
+          changes,
+          projection,
+          managedFieldIds.cloudflareZoneToken,
+          [managedFieldIds.cloudflareZoneTokenAlias],
+          bindings,
+          challenge.cloudflareZoneToken,
+          challenge.cloudflareZoneTokenPresent,
+        );
+      } else if (challenge.provider === "digitalocean") {
+        emitSecretDraft(
+          changes,
+          projection,
+          managedFieldIds.digitalOceanToken,
+          [],
+          bindings,
+          challenge.digitalOceanToken,
+          challenge.digitalOceanTokenPresent,
+        );
+      } else {
+        emitSecretDraft(
+          changes,
+          projection,
+          managedFieldIds.duckDnsToken,
+          [],
+          bindings,
+          challenge.duckDnsToken,
+          challenge.duckDnsTokenPresent,
+        );
+      }
+      continue;
+    }
     emitOptionalOrRequired(
       changes,
       projection,
@@ -1445,6 +1889,136 @@ export function validateDraft(draft: NativeConfigurationDraft): DraftIssue[] {
     }
   });
   draft.challenges.forEach((challenge, index) => {
+    if (challenge.kind === "dns") {
+      if (!safeNativePath(challenge.envFile)) {
+        issues.push({
+          fieldId: `challenge-${index}-env-file`,
+          message:
+            "Credential file must be a bounded native path resolved from the working directory.",
+        });
+      }
+      if (
+        !Number.isSafeInteger(challenge.dnsTimeout) ||
+        challenge.dnsTimeout < 0 ||
+        challenge.dnsTimeout > 600
+      ) {
+        issues.push({
+          fieldId: `challenge-${index}-dns-timeout`,
+          message: "DNS resolver timeout must be 0 through 600 seconds.",
+        });
+      }
+      const wait = durationMilliseconds(challenge.propagationWait);
+      if (
+        wait === null ||
+        wait < 0 ||
+        wait > 10 * 60_000 ||
+        (wait > 0 &&
+          (challenge.disableAuthoritative || challenge.disableRecursive))
+      ) {
+        issues.push({
+          fieldId: `challenge-${index}-propagation-wait`,
+          message:
+            "Use a zero-to-10m wait, and do not mix a fixed wait with disabled nameserver checks.",
+        });
+      }
+      if (
+        challenge.resolvers.length > 8 ||
+        challenge.resolvers.some(
+          (resolver) =>
+            resolver.length === 0 ||
+            new TextEncoder().encode(resolver).length > 256 ||
+            /[\s/]/.test(resolver),
+        )
+      ) {
+        issues.push({
+          fieldId: `challenge-${index}-resolvers`,
+          message:
+            "Use at most eight DNS resolver hosts or IP addresses with optional ports.",
+        });
+      }
+      const secretAvailable = (draft: SecretDraft, present: boolean) =>
+        (draft.action === "keep" && present) ||
+        (draft.action === "replace" && draft.secret.length > 0);
+      if (challenge.provider === "cloudflare") {
+        if (challenge.cloudflareAuthMode === "legacy") {
+          if (!emailPattern.test(challenge.cloudflareEmail)) {
+            issues.push({
+              fieldId: `challenge-${index}-cloudflare-email`,
+              message: "Enter the Cloudflare account email.",
+            });
+          }
+          if (
+            !secretAvailable(
+              challenge.cloudflareApiKey,
+              challenge.cloudflareApiKeyPresent,
+            )
+          ) {
+            issues.push({
+              fieldId: `challenge-${index}-cloudflare-api-key-replacement`,
+              message: "Provide the write-only Cloudflare global API key.",
+            });
+          }
+        } else if (
+          !secretAvailable(
+            challenge.cloudflareDnsToken,
+            challenge.cloudflareDnsTokenPresent,
+          )
+        ) {
+          issues.push({
+            fieldId: `challenge-${index}-cloudflare-dns-token-replacement`,
+            message: "Provide a Cloudflare token with DNS:Edit permission.",
+          });
+        }
+      } else if (
+        challenge.provider === "digitalocean" &&
+        !secretAvailable(
+          challenge.digitalOceanToken,
+          challenge.digitalOceanTokenPresent,
+        )
+      ) {
+        issues.push({
+          fieldId: `challenge-${index}-digitalocean-token-replacement`,
+          message: "Provide the write-only DigitalOcean API token.",
+        });
+      } else if (
+        challenge.provider === "duckdns" &&
+        !secretAvailable(challenge.duckDnsToken, challenge.duckDnsTokenPresent)
+      ) {
+        issues.push({
+          fieldId: `challenge-${index}-duckdns-token-replacement`,
+          message: "Provide the write-only DuckDNS account token.",
+        });
+      }
+      for (const [fieldId, value] of Object.entries(
+        challenge.providerSettings,
+      )) {
+        if (!value) continue;
+        const numeric =
+          !fieldId.endsWith("base_url") && !fieldId.endsWith("api_url");
+        if (
+          numeric &&
+          (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 86400)
+        ) {
+          issues.push({
+            fieldId: `challenge-${index}-${fieldId.replaceAll(".", "-")}`,
+            message:
+              "Provider timing and TTL overrides use bounded whole seconds.",
+          });
+        }
+        if (
+          !numeric &&
+          !/^https:\/\/[^\s/?#]+/.test(value) &&
+          !/^http:\/\/(127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/.test(value)
+        ) {
+          issues.push({
+            fieldId: `challenge-${index}-${fieldId.replaceAll(".", "-")}`,
+            message:
+              "Provider endpoint overrides require HTTPS or loopback HTTP.",
+          });
+        }
+      }
+      return;
+    }
     if (
       challenge.mode === "listener" &&
       !validListenerAddress(challenge.address)
@@ -1529,7 +2103,9 @@ export function validateDraft(draft: NativeConfigurationDraft): DraftIssue[] {
       if (
         domain.startsWith("*.") &&
         draft.challenges.some(
-          (challenge) => challenge.name === certificate.challenge,
+          (challenge) =>
+            challenge.name === certificate.challenge &&
+            challenge.kind === "http",
         )
       ) {
         issues.push({
@@ -1555,7 +2131,8 @@ export function validateDraft(draft: NativeConfigurationDraft): DraftIssue[] {
     ) {
       issues.push({
         fieldId: `certificate-${index}-challenge`,
-        message: "Choose an HTTP-01 challenge defined above.",
+        message:
+          "Choose a supported HTTP-01 or DNS-01 challenge defined above.",
       });
     }
     if (

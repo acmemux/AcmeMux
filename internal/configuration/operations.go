@@ -247,7 +247,7 @@ func (service *Service) ResolveRecovery(
 			}
 			documents := loadDotenvDocuments(inspection, sources, false)
 			defer documents.close()
-			inspection = applyDotenvPresence(inspection, documents)
+			inspection = applyDotenvPresence(inspection, documents, false)
 			state, editing, _ := configurationState(inspection, documents)
 			if !editing || state == StateInvalid {
 				return ErrInvalid
@@ -394,7 +394,7 @@ func (service *Service) evaluateLocked(ctx context.Context, lease *workspace.Lea
 	}
 	documents := loadDotenvDocuments(inspection, sources, false)
 	result.documents = documents
-	inspection = applyDotenvPresence(inspection, documents)
+	inspection = applyDotenvPresence(inspection, documents, false)
 	diagnostics := diagnosticsForInspection(inspection)
 	diagnostics = appendDiagnostics(diagnostics, documents.diagnostics...)
 	state, editing, execution := configurationState(inspection, documents)
@@ -465,7 +465,7 @@ func (service *Service) prepareCandidate(
 		complete = true
 		return prepared, nil
 	}
-	inspection := applyDotenvPresence(candidate.Inspection, documents)
+	inspection := applyDotenvPresence(candidate.Inspection, documents, true)
 	diagnostics := diagnosticsForInspection(inspection)
 	diagnostics = appendDiagnostics(diagnostics, documents.diagnostics...)
 	state, editing, execution := configurationState(inspection, documents)

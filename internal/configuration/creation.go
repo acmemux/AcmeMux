@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
 	"github.com/sgurden-certleap/AcmeMux/internal/nativeconfig"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
@@ -173,9 +174,6 @@ func (service *Service) prepareCreation(
 		return nil, fmt.Errorf("%w: native configuration creation preview", ErrInvalid)
 	}
 	defer candidate.Clear()
-	if len(candidate.ExternalChanges()) != 0 {
-		return nil, fmt.Errorf("%w: native creation cannot introduce external credential files", ErrInvalid)
-	}
 	prepared := &preparedCreation{
 		candidate: &preparedCandidate{
 			yaml: candidate.YAML(), summary: slices.Clone(candidate.Summary),
@@ -192,7 +190,23 @@ func (service *Service) prepareCreation(
 	if err != nil {
 		return nil, fmt.Errorf("%w: inspect native creation candidate", ErrInvalid)
 	}
-	documents := &dotenvDocuments{byPath: make(map[string]*dotenvDocument)}
+	syntheticSources := &workspace.SourceSet{Selection: workspace.Selection{Review: workspace.Review{
+		WorkingDirectory: workspace.PathEvidence{Path: request.WorkingDirectory},
+	}}}
+	documents, dotenvReplacements, dotenvImpacts, externalErr := applyExternalChanges(
+		inspection, syntheticSources, candidate.ExternalChanges(),
+	)
+	if documents != nil {
+		defer documents.close()
+	}
+	if externalErr != nil {
+		return nil, fmt.Errorf("%w: native creation credential candidate", ErrInvalid)
+	}
+	prepared.candidate.summary = slices.DeleteFunc(prepared.candidate.summary, func(summary nativeconfig.ChangeSummary) bool {
+		return summary.Target == integrations.TargetDotenv
+	})
+	prepared.candidate.summary = append(prepared.candidate.summary, dotenvImpacts...)
+	inspection = applyDotenvPresence(inspection, documents, true)
 	state, editing, execution := configurationState(inspection, documents)
 	prepared.candidate.inspection = inspection
 	prepared.candidate.resultState = state
@@ -211,6 +225,7 @@ func (service *Service) prepareCreation(
 		Role: workspace.RoleConfiguration, Path: configurationPath,
 		Content: slices.Clone(prepared.candidate.yaml),
 	}}
+	prepared.candidate.replacements = append(prepared.candidate.replacements, dotenvReplacements...)
 	audit, err := service.transactions.AuditBootstrap(ctx, lease, workspace.BootstrapRequest{
 		WorkingDirectory: request.WorkingDirectory, ConfigurationPath: request.ConfigurationPath,
 	}, prepared.candidate.yaml, prepared.candidate.replacements)

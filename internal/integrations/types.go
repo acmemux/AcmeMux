@@ -71,11 +71,12 @@ type Value struct {
 	listValue   []string
 }
 
-// ValidateSecretBytes applies the immutable dotenv string contract without
-// converting a confidential value to an immutable Go string.
-func (s FieldSpec) ValidateSecretBytes(value []byte) error {
-	if s.target != TargetDotenv || s.sensitivity != SensitivitySecret || s.kind != FieldString {
-		return fmt.Errorf("field is not a managed dotenv secret")
+// ValidateDotenvBytes applies the immutable dotenv string contract without
+// converting a confidential value to an immutable Go string. Provider-specific
+// semantic bounds are applied separately by the curated integration.
+func (s FieldSpec) ValidateDotenvBytes(value []byte) error {
+	if s.target != TargetDotenv || s.kind != FieldString {
+		return fmt.Errorf("field is not a managed dotenv value")
 	}
 	rules := s.rules
 	if !rules.AllowEmpty && len(value) == 0 {
@@ -102,6 +103,15 @@ func (s FieldSpec) ValidateSecretBytes(value []byte) error {
 		}
 	}
 	return nil
+}
+
+// ValidateSecretBytes preserves the narrow call surface used by secret-only
+// consumers while public provider settings share the same byte-safe parser.
+func (s FieldSpec) ValidateSecretBytes(value []byte) error {
+	if s.sensitivity != SensitivitySecret {
+		return fmt.Errorf("field is not a managed dotenv secret")
+	}
+	return s.ValidateDotenvBytes(value)
 }
 
 func StringValue(value string) Value { return Value{kind: FieldString, stringValue: value} }

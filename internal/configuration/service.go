@@ -219,7 +219,7 @@ func New(dependencies Dependencies) (*Service, error) {
 }
 
 func productionEngine(runtimeID compatibility.ManifestID) (*nativeconfig.Engine, integrations.Manifest, error) {
-	manifest, ok := integrations.CoreManifest(runtimeID)
+	manifest, ok := integrations.CoreDNSManifest(runtimeID)
 	if !ok {
 		return nil, integrations.Manifest{}, fmt.Errorf("%w: runtime integration manifest", ErrUnavailable)
 	}

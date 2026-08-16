@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sgurden-certleap/AcmeMux/internal/identity"
+	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
 	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
 	"github.com/sgurden-certleap/AcmeMux/internal/operation"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
@@ -386,7 +387,7 @@ func presentOperationPreview(preview operation.Preview) (operationPreview, bool)
 			!operationIdentifierPattern.MatchString(certificate.Account) ||
 			!operationIdentifierPattern.MatchString(certificate.ChallengeName) ||
 			len(certificate.Domains) == 0 || len(certificate.Domains) > 100 ||
-			(certificate.ChallengeMode != "listener" && certificate.ChallengeMode != "webroot") {
+			!validOperationChallenge(certificate.ChallengeKind, certificate.ChallengeMode) {
 			return operationPreview{}, false
 		}
 		if _, ok := acceptedOperationCAs[certificate.CA]; !ok {
@@ -410,7 +411,7 @@ func presentOperationPreview(preview operation.Preview) (operationPreview, bool)
 			Name: certificate.Name, Domains: append([]string{}, certificate.Domains...),
 			Account: certificate.Account, CA: certificate.CA,
 			Challenge: operationChallenge{
-				Name: certificate.ChallengeName, Kind: "http-01", Mode: certificate.ChallengeMode,
+				Name: certificate.ChallengeName, Kind: certificate.ChallengeKind, Mode: certificate.ChallengeMode,
 			},
 		})
 	}
@@ -428,6 +429,13 @@ func presentOperationPreview(preview operation.Preview) (operationPreview, bool)
 		},
 		Policy: policy,
 	}, true
+}
+
+func validOperationChallenge(kind, mode string) bool {
+	if kind == "http-01" {
+		return mode == "listener" || mode == "webroot"
+	}
+	return kind == "dns-01" && integrations.SupportsCoreDNSProvider(mode)
 }
 
 func presentOperationPolicy(policy operation.Policy) (operationPolicy, bool) {

@@ -133,8 +133,8 @@ func (e *Engine) inspect(source []byte, creation bool) (Inspection, error) {
 	if schemaValid {
 		semanticIssues = validateSemantics(document, e.limits.MaxIssues)
 		semanticValid = len(semanticIssues) == 0
-		if semanticValid && e.manifest.ID() == integrations.CoreManifestID {
-			constraintIssues = validateCoreConstraints(document, e.limits.MaxIssues, creation)
+		if semanticValid && e.usesCoreSemantics() {
+			constraintIssues = validateCoreConstraints(document, e.limits.MaxIssues, creation, e.supportsCoreDNS())
 		}
 	}
 	projection, routes, classification, projectionOverflow := e.projectAndClassify(document)
@@ -246,6 +246,12 @@ func (e *Engine) Preview(source []byte, changes []Change) (*Candidate, error) {
 			if err := spec.ValidateValue(change.Value); err != nil {
 				return nil, &Error{Code: ErrorInvalidChange, Detail: "field value violates its integration contract"}
 			}
+			if spec.Target() == integrations.TargetDotenv {
+				text, ok := change.Value.String()
+				if !ok || integrations.ValidateCoreDNSDotenvValue(spec.ID(), []byte(text)) != nil {
+					return nil, &Error{Code: ErrorInvalidChange, Detail: "dotenv value violates its provider integration contract"}
+				}
+			}
 		}
 		bindingValues, canonicalBindings, err := normalizeBindings(spec, change.Bindings)
 		if err != nil {
@@ -316,7 +322,7 @@ func (e *Engine) Preview(source []byte, changes []Change) (*Candidate, error) {
 	if err != nil {
 		return nil, err
 	}
-	if e.manifest.ID() == integrations.CoreManifestID {
+	if e.usesCoreSemantics() {
 		baseDocument, baseErr := parseDocument(source, e.limits)
 		candidateDocument, candidateErr := parseDocument(candidateYAML, e.limits)
 		if baseErr != nil || candidateErr != nil {
@@ -350,6 +356,12 @@ func (e *Engine) Preview(source []byte, changes []Change) (*Candidate, error) {
 		Changed: changed, Inspection: inspection, Summary: summary, external: external,
 	}, nil
 }
+
+func (e *Engine) usesCoreSemantics() bool {
+	return e.manifest.ID() == integrations.CoreManifestID || e.manifest.ID() == integrations.CoreDNSManifestID
+}
+
+func (e *Engine) supportsCoreDNS() bool { return e.manifest.ID() == integrations.CoreDNSManifestID }
 
 func coreEABReplacements(changes []preparedChange) map[string]bool {
 	const (

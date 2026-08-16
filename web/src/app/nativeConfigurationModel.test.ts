@@ -5,6 +5,7 @@ import {
   initialConfigurationDraft,
   managedFieldIds,
   maximumConfigurationChanges,
+  newDNSChallenge,
   type NativeConfigurationDraft,
   validateChangeBudget,
   validateDraft,
@@ -1233,6 +1234,78 @@ describe("native configuration model", () => {
       ...draft.accounts[0]!,
       isNew: true,
       originalServer: null,
+    };
+    expect(validateDraft(draft)).toEqual([]);
+  });
+
+  it("maps a new Cloudflare DNS challenge to exact YAML and write-only dotenv fields", () => {
+    const draft = validDraft();
+    draft.challenges = [
+      {
+        ...newDNSChallenge("dns-home"),
+        envFile: ".cloudflare.env",
+        dnsTimeout: 30,
+        resolvers: ["1.1.1.1:53"],
+        cloudflareDnsToken: {
+          action: "replace",
+          secret: "write-only-token",
+        },
+        providerSettings: { [managedFieldIds.cloudflareTtl]: "300" },
+      },
+    ];
+    draft.certificates[0] = {
+      ...draft.certificates[0]!,
+      challenge: "dns-home",
+      domains: ["*.example.com", "example.com"],
+    };
+
+    expect(validateDraft(draft)).toEqual([]);
+    const changes = changesFromDraft(draft, [], true);
+    expect(changes).toEqual(
+      expect.arrayContaining([
+        {
+          fieldId: managedFieldIds.challengeDnsProvider,
+          bindings: [{ id: "challenge", value: "dns-home" }],
+          operation: "set",
+          value: "cloudflare",
+        },
+        {
+          fieldId: managedFieldIds.challengeDnsEnvFile,
+          bindings: [{ id: "challenge", value: "dns-home" }],
+          operation: "set",
+          value: ".cloudflare.env",
+        },
+        {
+          fieldId: managedFieldIds.cloudflareDnsToken,
+          bindings: [{ id: "challenge", value: "dns-home" }],
+          operation: "set",
+          value: "write-only-token",
+        },
+        {
+          fieldId: managedFieldIds.cloudflareTtl,
+          bindings: [{ id: "challenge", value: "dns-home" }],
+          operation: "set",
+          value: "300",
+        },
+      ]),
+    );
+    expect(
+      changes.some((change) => change.fieldId.startsWith("challenge.http.")),
+    ).toBe(false);
+  });
+
+  it("requires one complete DNS provider authentication mode", () => {
+    const draft = validDraft();
+    draft.challenges = [newDNSChallenge("dns-home")];
+    draft.certificates[0]!.challenge = "dns-home";
+    expect(validateDraft(draft)).toContainEqual(
+      expect.objectContaining({
+        fieldId: "challenge-0-cloudflare-dns-token-replacement",
+      }),
+    );
+    draft.challenges[0]!.cloudflareDnsToken = {
+      action: "replace",
+      secret: "token",
     };
     expect(validateDraft(draft)).toEqual([]);
   });

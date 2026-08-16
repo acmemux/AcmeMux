@@ -89,9 +89,6 @@ func NewFieldSpec(definition FieldDefinition) (FieldSpec, error) {
 		if definition.Kind != FieldString {
 			return FieldSpec{}, fmt.Errorf("dotenv field must be a string")
 		}
-		if definition.Sensitivity != SensitivitySecret {
-			return FieldSpec{}, fmt.Errorf("dotenv field must be secret")
-		}
 	}
 	if definition.Sensitivity != SensitivityPublic && definition.Sensitivity != SensitivitySecret {
 		return FieldSpec{}, fmt.Errorf("invalid field sensitivity")

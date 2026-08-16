@@ -279,7 +279,7 @@ export function NativeConfigurationEditor({
           <h3 id="managed-configuration-heading">
             {creation
               ? "Prepare the first supported configuration"
-              : "CA, certificate, and HTTP-01 configuration"}
+              : "CA, certificate, HTTP-01, and DNS-01 configuration"}
           </h3>
         </div>
         <StatusBadge tone={creation ? "warning" : "info"}>

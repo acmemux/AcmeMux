@@ -9,6 +9,8 @@ import {
   caOptions,
   keyTypeOptions,
   managedFieldIds,
+  newDNSChallenge,
+  newHTTPChallenge,
   nextEntityName,
   resolveCA,
   type DraftIssue,
@@ -496,39 +498,49 @@ export function ChallengesEditor({
       <div className="am-configuration-editor__section-heading">
         <div>
           <p className="am-kicker">Challenge delivery</p>
-          <h4 id="configuration-challenges-heading">HTTP-01 challenges</h4>
+          <h4 id="configuration-challenges-heading">Challenge integrations</h4>
         </div>
-        <ActionButton
-          isDisabled={
-            disabled || draft.challenges.length >= (creation ? 6 : 16)
-          }
-          onPress={() =>
-            mutate((current) => ({
-              ...current,
-              challenges: [
-                ...current.challenges,
-                {
-                  name: nextEntityName("http", current.challenges),
-                  isNew: true,
-                  predefined: false,
-                  mode: "listener",
-                  address: ":8080",
-                  delay: "0s",
-                  proxyHeader: "Host",
-                  webroot: "",
-                },
-              ],
-            }))
-          }
-          variant="secondary"
-        >
-          Add HTTP-01 challenge
-        </ActionButton>
+        <div className="am-configuration-editor__actions">
+          <ActionButton
+            isDisabled={
+              disabled || draft.challenges.length >= (creation ? 6 : 16)
+            }
+            onPress={() =>
+              mutate((current) => ({
+                ...current,
+                challenges: [
+                  ...current.challenges,
+                  newHTTPChallenge(nextEntityName("http", current.challenges)),
+                ],
+              }))
+            }
+            variant="secondary"
+          >
+            Add HTTP-01
+          </ActionButton>
+          <ActionButton
+            isDisabled={
+              disabled || draft.challenges.length >= (creation ? 6 : 16)
+            }
+            onPress={() =>
+              mutate((current) => ({
+                ...current,
+                challenges: [
+                  ...current.challenges,
+                  newDNSChallenge(nextEntityName("dns", current.challenges)),
+                ],
+              }))
+            }
+            variant="secondary"
+          >
+            Add DNS-01
+          </ActionButton>
+        </div>
       </div>
       <p className="am-configuration-editor__limit">
         {creation
-          ? "Up to 6 HTTP-01 challenges can be added in one bounded creation draft."
-          : "HTTP-01 additions remain bounded by the reviewed native change budget."}
+          ? "Up to 6 HTTP-01 or curated DNS-01 challenges can be added in one bounded creation draft."
+          : "Challenge additions remain bounded by the reviewed native change budget."}
       </p>
       {draft.challenges.map((challenge, index) => {
         const prefix = "challenge-" + String(index);
@@ -537,6 +549,20 @@ export function ChallengesEditor({
         const delayId = prefix + "-delay";
         const proxyId = prefix + "-proxy-header";
         const webrootId = prefix + "-webroot";
+        if (challenge.kind === "dns") {
+          return (
+            <DNSChallengeEditor
+              challenge={challenge}
+              disabled={disabled}
+              draft={draft}
+              index={index}
+              issues={issues}
+              key={(challenge.isNew ? "new:" : "existing:") + challenge.name}
+              mutate={mutate}
+              updateChallenge={updateChallenge}
+            />
+          );
+        }
         const port = Number(
           challenge.address.slice(challenge.address.lastIndexOf(":") + 1),
         );
@@ -748,6 +774,445 @@ export function ChallengesEditor({
         );
       })}
     </section>
+  );
+}
+
+const dnsProviderOptions = [
+  { value: "cloudflare", label: "Cloudflare" },
+  { value: "digitalocean", label: "DigitalOcean" },
+  { value: "duckdns", label: "DuckDNS" },
+] as const;
+
+const providerSettings = {
+  cloudflare: [
+    [managedFieldIds.cloudflareTtl, "TXT TTL", "120"],
+    [
+      managedFieldIds.cloudflarePropagationTimeout,
+      "Propagation timeout",
+      "120",
+    ],
+    [managedFieldIds.cloudflarePollingInterval, "Polling interval", "2"],
+    [managedFieldIds.cloudflareHttpTimeout, "HTTP timeout", "30"],
+    [
+      managedFieldIds.cloudflareBaseUrl,
+      "API base URL",
+      "https://api.cloudflare.com/client/v4",
+    ],
+  ],
+  digitalocean: [
+    [managedFieldIds.digitalOceanTtl, "TXT TTL", "30"],
+    [
+      managedFieldIds.digitalOceanPropagationTimeout,
+      "Propagation timeout",
+      "60",
+    ],
+    [managedFieldIds.digitalOceanPollingInterval, "Polling interval", "5"],
+    [managedFieldIds.digitalOceanHttpTimeout, "HTTP timeout", "30"],
+    [
+      managedFieldIds.digitalOceanApiUrl,
+      "API URL",
+      "https://api.digitalocean.com",
+    ],
+  ],
+  duckdns: [
+    [managedFieldIds.duckDnsPropagationTimeout, "Propagation timeout", "60"],
+    [managedFieldIds.duckDnsPollingInterval, "Polling interval", "2"],
+    [managedFieldIds.duckDnsHttpTimeout, "HTTP timeout", "30"],
+    [
+      managedFieldIds.duckDnsSequenceInterval,
+      "Sequential request interval",
+      "60",
+    ],
+  ],
+} as const;
+
+function DNSChallengeEditor({
+  challenge,
+  disabled,
+  draft,
+  index,
+  issues,
+  mutate,
+  updateChallenge,
+}: {
+  challenge: NativeConfigurationDraft["challenges"][number];
+  disabled: boolean;
+  draft: NativeConfigurationDraft;
+  index: number;
+  issues: DraftIssue[];
+  mutate: MutateDraft;
+  updateChallenge: (
+    index: number,
+    update: Partial<NativeConfigurationDraft["challenges"][number]>,
+  ) => void;
+}) {
+  const prefix = `challenge-${index}`;
+  const secret = (
+    id: string,
+    label: string,
+    field:
+      | "cloudflareApiKey"
+      | "cloudflareDnsToken"
+      | "cloudflareZoneToken"
+      | "digitalOceanToken"
+      | "duckDnsToken",
+    presentField:
+      | "cloudflareApiKeyPresent"
+      | "cloudflareDnsTokenPresent"
+      | "cloudflareZoneTokenPresent"
+      | "digitalOceanTokenPresent"
+      | "duckDnsTokenPresent",
+    description: string,
+  ) => (
+    <WriteOnlySecretField
+      description={description}
+      draft={challenge[field]}
+      error={issueFor(issues, `${prefix}-${id}-replacement`)}
+      id={`${prefix}-${id}`}
+      isDisabled={disabled}
+      label={label}
+      maxLength={4096}
+      onChange={(value) => updateChallenge(index, { [field]: value })}
+      presence={challenge[presentField] ? "present" : "absent"}
+    />
+  );
+  return (
+    <fieldset className="am-configuration-editor__entity">
+      <legend>
+        DNS-01 {index + 1}: <code>{challenge.name}</code>
+      </legend>
+      {challenge.isNew ? (
+        <ConfigurationField
+          description="A stable native map name referenced by certificates."
+          error={issueFor(issues, `${prefix}-name`)}
+          id={`${prefix}-name`}
+          label="Challenge name"
+        >
+          <input
+            disabled={disabled}
+            id={`${prefix}-name`}
+            maxLength={64}
+            onChange={(event) =>
+              updateChallenge(index, { name: event.currentTarget.value })
+            }
+            value={challenge.name}
+          />
+        </ConfigurationField>
+      ) : null}
+      <div className="am-configuration-editor__grid">
+        <ConfigurationField
+          description={
+            challenge.isNew
+              ? "Provider code written to native YAML."
+              : "Changing an adopted provider requires a new challenge so credential cleanup remains atomic."
+          }
+          id={`${prefix}-provider`}
+          label="DNS provider"
+        >
+          <select
+            disabled={disabled || !challenge.isNew}
+            id={`${prefix}-provider`}
+            onChange={(event) => {
+              const provider = event.currentTarget
+                .value as typeof challenge.provider;
+              updateChallenge(index, {
+                provider,
+                originalProvider: provider,
+                envFile: `.${provider}.env`,
+              });
+            }}
+            value={challenge.provider}
+          >
+            {dnsProviderOptions.map((provider) => (
+              <option key={provider.value} value={provider.value}>
+                {provider.label}
+              </option>
+            ))}
+          </select>
+        </ConfigurationField>
+        <ConfigurationField
+          description="Credentials and provider options remain only in this restrictive native dotenv file."
+          error={issueFor(issues, `${prefix}-env-file`)}
+          id={`${prefix}-env-file`}
+          label="Credential file"
+        >
+          <input
+            disabled={disabled || !challenge.isNew}
+            id={`${prefix}-env-file`}
+            maxLength={4095}
+            onChange={(event) =>
+              updateChallenge(index, { envFile: event.currentTarget.value })
+            }
+            spellCheck={false}
+            value={challenge.envFile}
+          />
+        </ConfigurationField>
+        <ConfigurationField
+          description="Resolver timeout in whole seconds; zero uses upstream defaults."
+          error={issueFor(issues, `${prefix}-dns-timeout`)}
+          id={`${prefix}-dns-timeout`}
+          label="DNS timeout"
+        >
+          <input
+            disabled={disabled}
+            id={`${prefix}-dns-timeout`}
+            max={600}
+            min={0}
+            onChange={(event) =>
+              updateChallenge(index, {
+                dnsTimeout: event.currentTarget.valueAsNumber,
+              })
+            }
+            type="number"
+            value={challenge.dnsTimeout}
+          />
+        </ConfigurationField>
+        <ConfigurationField
+          description="Optional resolver host or IP per line, with an optional port."
+          error={issueFor(issues, `${prefix}-resolvers`)}
+          id={`${prefix}-resolvers`}
+          label="Recursive resolvers"
+        >
+          <textarea
+            disabled={disabled}
+            id={`${prefix}-resolvers`}
+            onChange={(event) =>
+              updateChallenge(index, {
+                resolvers: event.currentTarget.value
+                  .split(/\r?\n/)
+                  .filter(Boolean),
+              })
+            }
+            value={challenge.resolvers.join("\n")}
+          />
+        </ConfigurationField>
+        <ConfigurationField
+          description="A fixed Go duration such as 0s or 30s. A nonzero wait replaces nameserver checks."
+          error={issueFor(issues, `${prefix}-propagation-wait`)}
+          id={`${prefix}-propagation-wait`}
+          label="Fixed propagation wait"
+        >
+          <input
+            disabled={disabled}
+            id={`${prefix}-propagation-wait`}
+            maxLength={64}
+            onChange={(event) =>
+              updateChallenge(index, {
+                propagationWait: event.currentTarget.value,
+              })
+            }
+            value={challenge.propagationWait}
+          />
+        </ConfigurationField>
+      </div>
+      <div className="am-configuration-editor__segmented">
+        <label>
+          <input
+            checked={challenge.disableAuthoritative}
+            disabled={disabled || challenge.propagationWait !== "0s"}
+            onChange={(event) =>
+              updateChallenge(index, {
+                disableAuthoritative: event.currentTarget.checked,
+              })
+            }
+            type="checkbox"
+          />{" "}
+          Disable authoritative checks
+        </label>
+        <label>
+          <input
+            checked={challenge.disableRecursive}
+            disabled={disabled || challenge.propagationWait !== "0s"}
+            onChange={(event) =>
+              updateChallenge(index, {
+                disableRecursive: event.currentTarget.checked,
+              })
+            }
+            type="checkbox"
+          />{" "}
+          Disable recursive checks
+        </label>
+      </div>
+      {challenge.provider === "cloudflare" ? (
+        <>
+          <div className="am-configuration-editor__segmented">
+            <label>
+              <input
+                checked={challenge.cloudflareAuthMode === "token"}
+                disabled={disabled}
+                name={`${prefix}-cloudflare-auth`}
+                onChange={() =>
+                  updateChallenge(index, {
+                    cloudflareAuthMode: "token",
+                    cloudflareApiKey: { action: "keep" },
+                  })
+                }
+                type="radio"
+              />{" "}
+              Scoped API token
+            </label>
+            <label>
+              <input
+                checked={challenge.cloudflareAuthMode === "legacy"}
+                disabled={disabled}
+                name={`${prefix}-cloudflare-auth`}
+                onChange={() =>
+                  updateChallenge(index, {
+                    cloudflareAuthMode: "legacy",
+                    cloudflareDnsToken: { action: "keep" },
+                    cloudflareZoneToken: { action: "keep" },
+                  })
+                }
+                type="radio"
+              />{" "}
+              Legacy global key
+            </label>
+          </div>
+          {challenge.cloudflareAuthMode === "legacy" ? (
+            <>
+              <FeedbackPanel
+                tone="warning"
+                title="Legacy key grants broad account access"
+              >
+                <p>
+                  Prefer scoped tokens. The global API key can read and change
+                  substantially more than DNS records.
+                </p>
+              </FeedbackPanel>
+              <ConfigurationField
+                description="Cloudflare account email stored in the native dotenv file."
+                error={issueFor(issues, `${prefix}-cloudflare-email`)}
+                id={`${prefix}-cloudflare-email`}
+                label="Account email"
+              >
+                <input
+                  disabled={disabled}
+                  id={`${prefix}-cloudflare-email`}
+                  maxLength={254}
+                  onChange={(event) =>
+                    updateChallenge(index, {
+                      cloudflareEmail: event.currentTarget.value,
+                    })
+                  }
+                  value={challenge.cloudflareEmail}
+                />
+              </ConfigurationField>
+              {secret(
+                "cloudflare-api-key",
+                "Global API key",
+                "cloudflareApiKey",
+                "cloudflareApiKeyPresent",
+                "Write-only legacy credential stored only in the native dotenv file.",
+              )}
+            </>
+          ) : (
+            <>
+              <FeedbackPanel
+                tone="info"
+                title="Least-privilege Cloudflare tokens"
+              >
+                <p>
+                  Grant Zone / DNS / Edit to the DNS token. It may also carry
+                  Zone / Zone / Read, or supply a separate read-only zone token.
+                </p>
+              </FeedbackPanel>
+              {secret(
+                "cloudflare-dns-token",
+                "DNS API token",
+                "cloudflareDnsToken",
+                "cloudflareDnsTokenPresent",
+                "Required write-only token with DNS:Edit permission.",
+              )}
+              {secret(
+                "cloudflare-zone-token",
+                "Zone API token",
+                "cloudflareZoneToken",
+                "cloudflareZoneTokenPresent",
+                "Optional separate write-only token with Zone:Read permission.",
+              )}
+            </>
+          )}
+        </>
+      ) : challenge.provider === "digitalocean" ? (
+        secret(
+          "digitalocean-token",
+          "DigitalOcean API token",
+          "digitalOceanToken",
+          "digitalOceanTokenPresent",
+          "Write-only token with permission to manage domain records.",
+        )
+      ) : (
+        secret(
+          "duckdns-token",
+          "DuckDNS account token",
+          "duckDnsToken",
+          "duckDnsTokenPresent",
+          "Write-only DuckDNS account token.",
+        )
+      )}
+      <h5>Provider overrides</h5>
+      <div className="am-configuration-editor__grid">
+        {providerSettings[challenge.provider].map(
+          ([fieldId, label, placeholder]) => {
+            const id = `${prefix}-${fieldId.replaceAll(".", "-")}`;
+            return (
+              <ConfigurationField
+                description="Optional exact upstream override; leave blank to use the documented default."
+                error={issueFor(issues, id)}
+                id={id}
+                key={fieldId}
+                label={label}
+              >
+                <input
+                  disabled={disabled}
+                  id={id}
+                  onChange={(event) =>
+                    updateChallenge(index, {
+                      providerSettings: {
+                        ...challenge.providerSettings,
+                        [fieldId]: event.currentTarget.value,
+                      },
+                    })
+                  }
+                  placeholder={placeholder}
+                  value={challenge.providerSettings[fieldId] ?? ""}
+                />
+              </ConfigurationField>
+            );
+          },
+        )}
+      </div>
+      <FeedbackPanel
+        tone="info"
+        title={
+          challenge.provider === "duckdns"
+            ? "Sequential DNS updates"
+            : "Native provider execution"
+        }
+      >
+        <p>
+          {challenge.provider === "duckdns"
+            ? "DuckDNS exposes one TXT record per registered domain, so upstream lego resolves challenges sequentially using the configured interval."
+            : "AcmeMux writes only the curated native configuration. Upstream lego performs every provider API request."}
+        </p>
+      </FeedbackPanel>
+      {challenge.isNew && draft.challenges.length > 1 ? (
+        <ActionButton
+          isDisabled={disabled}
+          onPress={() =>
+            mutate((current) => ({
+              ...current,
+              challenges: current.challenges.filter(
+                (_, itemIndex) => itemIndex !== index,
+              ),
+            }))
+          }
+          variant="quiet"
+        >
+          Remove new challenge
+        </ActionButton>
+      ) : null}
+    </fieldset>
   );
 }
 

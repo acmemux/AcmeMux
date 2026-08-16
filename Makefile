@@ -7,7 +7,7 @@ GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
 export GOMODCACHE := $(CURDIR)/.cache/go-mod
 
-.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-race test-redaction test-runtime test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-core test-provider-core-smoke test-race test-redaction test-runtime test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -79,9 +79,18 @@ test-lego-integration:
 	@test -n "$$ACMEMUX_TEST_CHALLTESTSRV" || (echo "ACMEMUX_TEST_CHALLTESTSRV must name the pinned challtestsrv executable" && exit 1)
 	@test -n "$$ACMEMUX_TEST_LEGO_SOURCE" || (echo "ACMEMUX_TEST_LEGO_SOURCE must name the upstream lego source snapshot" && exit 1)
 	ACMEMUX_TEST_LEGO_INTEGRATION=1 go test -count=1 -timeout=5m -run '^TestSourceBuiltLegoFileMode$$' ./internal/broker/...
+	ACMEMUX_TEST_LEGO_INTEGRATION=1 go test -count=1 -timeout=5m -run '^TestCoreDNSUpstreamProviderFixtures$$' ./internal/integrations/...
 
 test-integrations:
 	go test ./internal/integrations/...
+
+test-provider-core:
+	go test ./internal/integrations/... ./internal/nativeconfig/... ./internal/configuration/... ./internal/httpapi/...
+	cd web && npm run test -- src/app/nativeConfigurationModel.test.ts src/app/NativeConfigurationFields.test.tsx
+
+test-provider-core-smoke:
+	@test "$$ACMEMUX_PROVIDER_SMOKE" = "1" || (echo "ACMEMUX_PROVIDER_SMOKE=1 is required for credentialed provider smoke" && exit 1)
+	go test -count=1 -run '^TestCredentialedCoreDNSProviderSmoke$$' ./internal/integrations/...
 
 test-nativeconfig:
 	go test ./internal/integrations/... ./internal/nativeconfig/... ./internal/configuration/...

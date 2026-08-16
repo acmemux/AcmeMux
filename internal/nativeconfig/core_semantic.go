@@ -17,6 +17,7 @@ import (
 const (
 	maximumHTTPDelay = 10 * time.Minute
 	maximumARIWait   = 10 * time.Minute
+	maximumDNSWait   = 10 * time.Minute
 )
 
 type caKind string
@@ -69,7 +70,7 @@ var canonicalCAServerURLs = map[string]string{
 // contract after the exact upstream schema and source semantics have passed.
 // Violations remain repairable through typed edits but block saving a new
 // violating candidate and block managed execution.
-func validateCoreConstraints(document *yaml.Node, limit int, creation bool) []Issue {
+func validateCoreConstraints(document *yaml.Node, limit int, creation bool, allowCoreDNS bool) []Issue {
 	var configuration nativeConfiguration
 	if err := document.Content[0].Decode(&configuration); err != nil {
 		return nil // validateSemantics already owns source-model decode failures.
@@ -101,12 +102,12 @@ func validateCoreConstraints(document *yaml.Node, limit int, creation bool) []Is
 		add([]string{"accounts"}, "New managed workspaces require at least one ACME account.")
 	}
 	if creation && len(configuration.Challenges) == 0 {
-		add([]string{"challenges"}, "New managed workspaces require at least one HTTP-01 challenge.")
+		add([]string{"challenges"}, "New managed workspaces require at least one supported challenge.")
 	}
 	if creation && len(configuration.Certificates) == 0 {
 		add([]string{"certificates"}, "New managed workspaces require at least one certificate.")
 	}
-	unsupportedNativeChallenges := unsupportedHTTPChallengeBindings(document.Content[0])
+	unsupportedNativeChallenges := unsupportedChallengeBindings(document.Content[0], allowCoreDNS)
 	unsupportedCertificates := unsupportedCertificateBindings(document.Content[0])
 	managedChallengeReferences := make(map[string]struct{})
 	for name, certificate := range configuration.Certificates {
@@ -199,7 +200,7 @@ func validateCoreConstraints(document *yaml.Node, limit int, creation bool) []Is
 		}
 		if _, unsupported := unsupportedNativeChallenges[name]; unsupported {
 			if creation {
-				add([]string{"challenges", name}, "New managed challenges must use the supported HTTP-01 listener or webroot integration.")
+				add([]string{"challenges", name}, "New managed challenges must use a supported HTTP-01 or curated DNS-01 integration.")
 			}
 			continue
 		}
@@ -208,9 +209,16 @@ func validateCoreConstraints(document *yaml.Node, limit int, creation bool) []Is
 				continue
 			}
 		}
-		if challenge == nil || challenge.HTTP == nil {
+		if challenge == nil {
+			continue
+		}
+		if challenge.DNS != nil && allowCoreDNS && integrations.SupportsCoreDNSProvider(challenge.DNS.Provider) {
+			validateCoreDNSChallenge(document, name, challenge.DNS, creation, add)
+			continue
+		}
+		if challenge.HTTP == nil {
 			if creation {
-				add([]string{"challenges", name, "http"}, "New managed challenges require an HTTP-01 configuration.")
+				add([]string{"challenges", name}, "New managed challenges require an HTTP-01 or curated DNS-01 configuration.")
 			}
 			continue
 		}
@@ -281,9 +289,12 @@ func validateCoreConstraints(document *yaml.Node, limit int, creation bool) []Is
 		selectedChallenge := configuration.Challenges[certificate.Challenge]
 		_, implicitUnsupported := implicitUnsupportedChallenges[certificate.Challenge]
 		explicitUnsupported := selectedChallenge != nil &&
-			(selectedChallenge.TLS != nil || selectedChallenge.DNS != nil || selectedChallenge.DNSPersist != nil)
+			(selectedChallenge.TLS != nil || selectedChallenge.DNSPersist != nil ||
+				(selectedChallenge.DNS != nil && (!allowCoreDNS || !integrations.SupportsCoreDNSProvider(selectedChallenge.DNS.Provider))))
 		if selectedChallenge != nil && selectedChallenge.HTTP == nil && !implicitUnsupported && !explicitUnsupported {
-			add(appendPath(base, "challenge"), "Task 07 managed certificates must reference an HTTP-01 challenge.")
+			if selectedChallenge.DNS == nil {
+				add(appendPath(base, "challenge"), "Managed certificates must reference a supported HTTP-01 or DNS-01 challenge.")
+			}
 		}
 		seen := make(map[string]struct{}, len(certificate.Domains))
 		duplicates := make(map[string]struct{})
@@ -328,6 +339,74 @@ func anyNativePathPresent(document *yaml.Node, prefix []string, keys ...string) 
 		}
 	}
 	return false
+}
+
+func validateCoreDNSChallenge(
+	document *yaml.Node,
+	name string,
+	dns *nativeDNSChallenge,
+	creation bool,
+	add func([]string, string),
+) {
+	base := []string{"challenges", name, "dns"}
+	if _, present := nodeAtPath(document, appendPath(base, "provider")); !present {
+		add(appendPath(base, "provider"), "Managed DNS-01 requires an explicit supported provider code.")
+	}
+	if _, present := nodeAtPath(document, appendPath(base, "envFile")); !present || dns.EnvFile == "" {
+		add(appendPath(base, "envFile"), "Managed DNS-01 requires one explicit provider credential file.")
+	}
+	if creation {
+		if _, present := nodeAtPath(document, appendPath(base, "dnsTimeout")); !present {
+			add(appendPath(base, "dnsTimeout"), "New managed DNS-01 challenges require an explicit resolver timeout.")
+		}
+		for _, path := range [][]string{
+			appendPath(appendPath(base, "propagation"), "disableAuthoritativeNameservers"),
+			appendPath(appendPath(base, "propagation"), "disableRecursiveNameservers"),
+			appendPath(appendPath(base, "propagation"), "wait"),
+		} {
+			if _, present := nodeAtPath(document, path); !present {
+				add(path, "New managed DNS-01 challenges require explicit propagation behavior.")
+			}
+		}
+	}
+	if dns.DNSTimeout < 0 || dns.DNSTimeout > 600 {
+		add(appendPath(base, "dnsTimeout"), "DNS resolver timeout must be zero through 600 seconds.")
+	}
+	for _, resolver := range dns.Resolvers {
+		if !validDNSResolver(resolver) {
+			add(appendPath(base, "resolvers"), "Recursive resolvers must be canonical DNS names or IP addresses with an optional port.")
+			break
+		}
+	}
+	if dns.Propagation != nil {
+		if dns.Propagation.Wait < 0 || dns.Propagation.Wait > maximumDNSWait {
+			add(appendPath(appendPath(base, "propagation"), "wait"), "Fixed DNS propagation wait is outside the supported zero-to-ten-minute range.")
+		}
+		if dns.Propagation.Wait > 0 && (dns.Propagation.DisableAuthoritativeNameservers || dns.Propagation.DisableRecursiveNameservers) {
+			add(appendPath(base, "propagation"), "A fixed propagation wait cannot be mixed with nameserver-check overrides.")
+		}
+	}
+}
+
+func validDNSResolver(value string) bool {
+	if value == "" || len(value) > 256 || strings.TrimSpace(value) != value || strings.Contains(value, "/") {
+		return false
+	}
+	host := value
+	if parsedHost, port, err := net.SplitHostPort(value); err == nil {
+		host = parsedHost
+		parsedPort, portErr := strconv.Atoi(port)
+		if portErr != nil || parsedPort < 1 || parsedPort > 65535 {
+			return false
+		}
+	} else if strings.Count(value, ":") > 1 {
+		host = strings.Trim(value, "[]")
+	}
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	_, _, valid := canonicalDNSName(strings.ToLower(host))
+	return valid
 }
 
 // validateCoreTransition applies registration prerequisites only when a

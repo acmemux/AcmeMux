@@ -57,8 +57,8 @@ export type ManualOperationIntent = {
     ca: string;
     challenge: {
       name: string;
-      kind: "http-01";
-      mode: "listener" | "webroot";
+      kind: "http-01" | "dns-01";
+      mode: "listener" | "webroot" | "cloudflare" | "digitalocean" | "duckdns";
     };
   }>;
   nativeEffects: [
@@ -357,8 +357,14 @@ function decodePreviewCertificate(
     !hasExactKeys(value.challenge, ["name", "kind", "mode"]) ||
     typeof value.challenge.name !== "string" ||
     !identifierPattern.test(value.challenge.name) ||
-    value.challenge.kind !== "http-01" ||
-    (value.challenge.mode !== "listener" && value.challenge.mode !== "webroot")
+    (value.challenge.kind !== "http-01" && value.challenge.kind !== "dns-01") ||
+    (value.challenge.kind === "http-01" &&
+      value.challenge.mode !== "listener" &&
+      value.challenge.mode !== "webroot") ||
+    (value.challenge.kind === "dns-01" &&
+      value.challenge.mode !== "cloudflare" &&
+      value.challenge.mode !== "digitalocean" &&
+      value.challenge.mode !== "duckdns")
   ) {
     invalidResponse();
   }
@@ -369,8 +375,9 @@ function decodePreviewCertificate(
     ca: value.ca,
     challenge: {
       name: value.challenge.name,
-      kind: "http-01",
-      mode: value.challenge.mode,
+      kind: value.challenge.kind,
+      mode: value.challenge
+        .mode as ManualOperationIntent["certificates"][number]["challenge"]["mode"],
     },
   };
 }
