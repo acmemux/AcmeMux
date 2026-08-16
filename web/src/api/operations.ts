@@ -119,6 +119,19 @@ export type CertificateOperationResult = {
   name: string;
   state: "completed" | "failed" | "not_attempted" | "ambiguous";
   reasonCode: string;
+  account: string | null;
+  ca: string | null;
+  challenge: {
+    kind: "http-01" | "dns-01";
+    mode:
+      | "listener"
+      | "webroot"
+      | "cloudflare"
+      | "digitalocean"
+      | "duckdns"
+      | "azuredns"
+      | "route53";
+  } | null;
 };
 
 export type TerminalOperationResult = {
@@ -154,6 +167,11 @@ export type TerminalOperationResult = {
         certificateCount: null;
         summary: string;
       };
+  summary: string;
+  nextAction: string;
+  runtime: { identity: string; manifestId: string } | null;
+  configurationPath: string | null;
+  storagePath: string | null;
 };
 
 export type LatestOperation =
@@ -632,7 +650,14 @@ function decodeStatus(value: unknown): OperationStatus {
 function decodeCertificateResult(value: unknown): CertificateOperationResult {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["name", "state", "reasonCode"]) ||
+    !hasExactKeys(value, [
+      "name",
+      "state",
+      "reasonCode",
+      "account",
+      "ca",
+      "challenge",
+    ]) ||
     typeof value.name !== "string" ||
     !identifierPattern.test(value.name) ||
     (value.state !== "completed" &&
@@ -640,7 +665,42 @@ function decodeCertificateResult(value: unknown): CertificateOperationResult {
       value.state !== "not_attempted" &&
       value.state !== "ambiguous") ||
     typeof value.reasonCode !== "string" ||
-    !reasonCodePattern.test(value.reasonCode)
+    !reasonCodePattern.test(value.reasonCode) ||
+    (value.account !== null &&
+      (typeof value.account !== "string" ||
+        !identifierPattern.test(value.account))) ||
+    (value.ca !== null &&
+      (typeof value.ca !== "string" || !acceptedCAs.has(value.ca))) ||
+    (value.challenge !== null && !isRecord(value.challenge))
+  ) {
+    invalidResponse();
+  }
+  let challenge: CertificateOperationResult["challenge"] = null;
+  if (value.challenge !== null) {
+    if (
+      !hasExactKeys(value.challenge, ["kind", "mode"]) ||
+      (value.challenge.kind !== "http-01" &&
+        value.challenge.kind !== "dns-01") ||
+      (value.challenge.kind === "http-01" &&
+        value.challenge.mode !== "listener" &&
+        value.challenge.mode !== "webroot") ||
+      (value.challenge.kind === "dns-01" &&
+        value.challenge.mode !== "cloudflare" &&
+        value.challenge.mode !== "digitalocean" &&
+        value.challenge.mode !== "duckdns" &&
+        value.challenge.mode !== "azuredns" &&
+        value.challenge.mode !== "route53")
+    ) {
+      invalidResponse();
+    }
+    challenge = {
+      kind: value.challenge.kind,
+      mode: value.challenge.mode,
+    } as CertificateOperationResult["challenge"];
+  }
+  if (
+    (value.account === null) !== (value.ca === null) ||
+    (value.ca === null) !== (challenge === null)
   ) {
     invalidResponse();
   }
@@ -648,6 +708,9 @@ function decodeCertificateResult(value: unknown): CertificateOperationResult {
     name: value.name,
     state: value.state,
     reasonCode: value.reasonCode,
+    account: value.account,
+    ca: value.ca,
+    challenge,
   };
 }
 
@@ -691,6 +754,11 @@ function decodeTerminalResult(value: unknown): TerminalOperationResult {
       "output",
       "certificates",
       "inventory",
+      "summary",
+      "nextAction",
+      "runtime",
+      "configurationPath",
+      "storagePath",
     ]) ||
     typeof value.id !== "string" ||
     !operationIdPattern.test(value.id) ||
@@ -721,7 +789,36 @@ function decodeTerminalResult(value: unknown): TerminalOperationResult {
     }) ||
     typeof value.output.truncated !== "boolean" ||
     !Array.isArray(value.certificates) ||
-    value.certificates.length > MAX_CERTIFICATES
+    value.certificates.length > MAX_CERTIFICATES ||
+    !boundedText(value.summary) ||
+    !boundedText(value.nextAction) ||
+    (value.runtime !== null && !isRecord(value.runtime)) ||
+    (value.configurationPath !== null &&
+      !validCanonicalPath(value.configurationPath)) ||
+    (value.storagePath !== null && !validCanonicalPath(value.storagePath))
+  ) {
+    invalidResponse();
+  }
+  let runtime: TerminalOperationResult["runtime"] = null;
+  if (value.runtime !== null) {
+    if (
+      !hasExactKeys(value.runtime, ["identity", "manifestId"]) ||
+      typeof value.runtime.identity !== "string" ||
+      (!releaseIdentityPattern.test(value.runtime.identity) &&
+        !revisionIdentityPattern.test(value.runtime.identity)) ||
+      typeof value.runtime.manifestId !== "string" ||
+      !manifestIdPattern.test(value.runtime.manifestId)
+    ) {
+      invalidResponse();
+    }
+    runtime = {
+      identity: value.runtime.identity,
+      manifestId: value.runtime.manifestId,
+    };
+  }
+  if (
+    (runtime === null) !== (value.configurationPath === null) ||
+    (value.configurationPath === null) !== (value.storagePath === null)
   ) {
     invalidResponse();
   }
@@ -743,6 +840,11 @@ function decodeTerminalResult(value: unknown): TerminalOperationResult {
     output: { text: value.output.text, truncated: value.output.truncated },
     certificates,
     inventory: decodeInventory(value.inventory),
+    summary: value.summary,
+    nextAction: value.nextAction,
+    runtime,
+    configurationPath: value.configurationPath,
+    storagePath: value.storagePath,
   };
 }
 

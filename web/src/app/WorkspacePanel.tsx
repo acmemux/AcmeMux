@@ -37,6 +37,7 @@ export type WorkspaceController = {
   requestRevision: number;
   runtimeRecheckRequired: boolean;
   snapshot: WorkspaceSnapshot | null;
+  staleInventory?: InventoryObservation | null;
   workingDirectory: string;
   workingDirectoryError: string | null;
   adopt(): Promise<void>;
@@ -45,6 +46,11 @@ export type WorkspaceController = {
   refresh(): Promise<void>;
   setConfigurationPath(path: string): void;
   setWorkingDirectory(path: string): void;
+};
+
+export type InventoryObservation = {
+  inventory: CertificateInventoryItem[];
+  observedAt: string;
 };
 
 function safeRequestMessage(error: unknown): string {
@@ -101,6 +107,8 @@ export function useWorkspaceController(
 ): WorkspaceController {
   const { endSession, rejectRequest } = useAuthenticatedSession();
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
+  const [staleInventory, setStaleInventory] =
+    useState<InventoryObservation | null>(null);
   const [candidate, setCandidate] = useState<WorkspaceCandidate | null>(null);
   const [phase, setPhase] = useState<WorkspacePhase>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -147,6 +155,17 @@ export function useWorkspaceController(
   const applySnapshot = useCallback(
     (next: WorkspaceSnapshot) => {
       setSnapshot(next);
+      if (
+        next.state === "ready" &&
+        typeof next.inventoryObservedAt === "string"
+      ) {
+        setStaleInventory({
+          inventory: next.inventory,
+          observedAt: next.inventoryObservedAt,
+        });
+      } else if (next.state === "unadopted") {
+        setStaleInventory(null);
+      }
       if (activationKey !== null) {
         setRuntimeBlockedActivationKey(
           next.state === "incompatible" ? activationKey : null,
@@ -384,6 +403,7 @@ export function useWorkspaceController(
     setConfigurationPath,
     setWorkingDirectory,
     snapshot: active && phase !== "loading" ? snapshot : null,
+    staleInventory: active ? staleInventory : null,
     workingDirectory,
     workingDirectoryError,
   };
@@ -778,6 +798,24 @@ function formatUTC(value: string): string {
   }).format(new Date(value));
 }
 
+function formatLocal(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(value));
+}
+
+function healthTone(health: CertificateInventoryItem["health"]): StatusTone {
+  if (health === "expired") return "danger";
+  if (health === "expiring") return "warning";
+  return "success";
+}
+
 function CertificateCard({
   certificate,
 }: {
@@ -790,7 +828,9 @@ function CertificateCard({
           <p className="am-kicker">Native certificate</p>
           <h3>{certificate.name}</h3>
         </div>
-        <StatusBadge tone="info">Inventory evidence</StatusBadge>
+        <StatusBadge tone={healthTone(certificate.health)}>
+          {certificate.health}
+        </StatusBadge>
       </header>
       <dl className="am-certificate-card__summary">
         <div>
@@ -809,8 +849,9 @@ function CertificateCard({
           <dt>Expiration</dt>
           <dd>
             <time dateTime={certificate.expiresAt}>
-              {formatUTC(certificate.expiresAt)}
+              {formatLocal(certificate.expiresAt)}
             </time>
+            <small>Exact UTC: {formatUTC(certificate.expiresAt)}</small>
           </dd>
         </div>
         <div>
@@ -860,29 +901,101 @@ function CertificateCard({
 
 function InventoryView({
   inventory,
+  observedAt,
+  stale = false,
 }: {
   inventory: CertificateInventoryItem[];
+  observedAt: string;
+  stale?: boolean;
 }) {
   const pageSize = 50;
   const [requestedPage, setRequestedPage] = useState(0);
-  const pageCount = Math.max(1, Math.ceil(inventory.length / pageSize));
+  const healthOrder = { expired: 0, expiring: 1, healthy: 2 } as const;
+  const orderedInventory = [...inventory].sort(
+    (left, right) =>
+      healthOrder[left.health] - healthOrder[right.health] ||
+      Date.parse(left.expiresAt) - Date.parse(right.expiresAt) ||
+      left.name.localeCompare(right.name),
+  );
+  const counts = inventory.reduce(
+    (result, certificate) => {
+      result[certificate.health] += 1;
+      return result;
+    },
+    { healthy: 0, expiring: 0, expired: 0 },
+  );
+  const pageCount = Math.max(1, Math.ceil(orderedInventory.length / pageSize));
   const page = Math.min(requestedPage, pageCount - 1);
   const start = page * pageSize;
-  const visibleInventory = inventory.slice(start, start + pageSize);
+  const visibleInventory = orderedInventory.slice(start, start + pageSize);
   const end = start + visibleInventory.length;
   return (
-    <section className="am-inventory" aria-labelledby="inventory-heading">
+    <section
+      className="am-inventory"
+      aria-labelledby="inventory-heading"
+      id="certificate-inventory"
+    >
       <div className="am-panel__heading">
         <div>
           <p className="am-kicker">Native inventory</p>
           <h2 id="inventory-heading">Certificate evidence</h2>
         </div>
-        <StatusBadge tone={inventory.length > 0 ? "success" : "not-attempted"}>
-          {inventory.length === 1
-            ? "1 certificate"
-            : `${inventory.length.toLocaleString("en-US")} certificates`}
+        <StatusBadge
+          tone={
+            stale
+              ? "interrupted"
+              : counts.expired > 0
+                ? "danger"
+                : counts.expiring > 0
+                  ? "warning"
+                  : inventory.length > 0
+                    ? "success"
+                    : "not-attempted"
+          }
+        >
+          {stale
+            ? "Stale evidence"
+            : counts.expired > 0
+              ? `${counts.expired.toLocaleString("en-US")} expired`
+              : counts.expiring > 0
+                ? `${counts.expiring.toLocaleString("en-US")} expiring`
+                : inventory.length === 1
+                  ? "1 healthy certificate"
+                  : `${inventory.length.toLocaleString("en-US")} healthy certificates`}
         </StatusBadge>
       </div>
+      {stale ? (
+        <FeedbackPanel tone="interrupted" title="Inventory is stale">
+          <p>
+            The current refresh failed. These browser-memory values were last
+            observed at {formatUTC(observedAt)} and are not current health.
+          </p>
+        </FeedbackPanel>
+      ) : (
+        <p className="am-inventory__observed">
+          Health observed from the service host clock at {formatUTC(observedAt)}
+          . Local time: {formatLocal(observedAt)}.
+        </p>
+      )}
+      {!stale && inventory.length > 0 ? (
+        <dl
+          className="am-inventory__health-summary"
+          aria-label="Certificate health summary"
+        >
+          <div>
+            <dt>Expired</dt>
+            <dd>{counts.expired.toLocaleString("en-US")}</dd>
+          </div>
+          <div>
+            <dt>Expiring within 30 days</dt>
+            <dd>{counts.expiring.toLocaleString("en-US")}</dd>
+          </div>
+          <div>
+            <dt>Healthy beyond 30 days</dt>
+            <dd>{counts.healthy.toLocaleString("en-US")}</dd>
+          </div>
+        </dl>
+      ) : null}
       {inventory.length === 0 ? (
         <p className="am-inventory__empty">
           The adopted native storage currently reports no certificates.
@@ -932,7 +1045,8 @@ function InventoryView({
       <p className="am-inventory__boundary">
         AcmeMux displays bounded upstream inventory and filesystem metadata. It
         does not copy certificate, chain, account, or private-key bytes into
-        application state.
+        application state. Health is an attention threshold, not a lego
+        renewal-due prediction.
       </p>
     </section>
   );
@@ -1002,6 +1116,7 @@ function SelectedWorkspace({
   refreshEnabled,
   runtimeReady,
   snapshot,
+  staleInventory,
 }: {
   focusReady: boolean;
   onRefresh: () => Promise<void>;
@@ -1009,6 +1124,7 @@ function SelectedWorkspace({
   refreshEnabled: boolean;
   runtimeReady: boolean;
   snapshot: WorkspaceSnapshot;
+  staleInventory: InventoryObservation | null;
 }) {
   const runtimeTrustBlocked = snapshot.state === "ready" && !runtimeReady;
   const presentation = runtimeTrustBlocked
@@ -1091,7 +1207,16 @@ function SelectedWorkspace({
         />
       </details>
       {snapshot.state === "ready" && runtimeReady ? (
-        <InventoryView inventory={snapshot.inventory} />
+        <InventoryView
+          inventory={snapshot.inventory}
+          observedAt={snapshot.inventoryObservedAt ?? "1970-01-01T00:00:00Z"}
+        />
+      ) : snapshot.state === "inventory_unavailable" && staleInventory ? (
+        <InventoryView
+          inventory={staleInventory.inventory}
+          observedAt={staleInventory.observedAt}
+          stale
+        />
       ) : null}
     </div>
   );
@@ -1325,6 +1450,14 @@ export function WorkspacePanel({
         </FeedbackPanel>
       ) : null}
 
+      {controller.error && controller.staleInventory ? (
+        <InventoryView
+          inventory={controller.staleInventory.inventory}
+          observedAt={controller.staleInventory.observedAt}
+          stale
+        />
+      ) : null}
+
       {controller.snapshot && !controller.candidate && !controller.error ? (
         <SelectedWorkspace
           focusReady={controller.readyFocusRequested}
@@ -1336,6 +1469,7 @@ export function WorkspacePanel({
           }
           runtimeReady={runtimeReady}
           snapshot={controller.snapshot}
+          staleInventory={controller.staleInventory ?? null}
         />
       ) : null}
 

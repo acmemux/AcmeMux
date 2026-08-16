@@ -320,6 +320,31 @@ describe("manual operation experience", () => {
     expect(screen.getByText(/media failed/)).toBeInTheDocument();
   });
 
+  it.each([
+    ["succeeded", "Succeeded"],
+    ["failed", "Failed"],
+    ["not_attempted", "Not attempted"],
+    ["timed_out", "Timed out"],
+    ["interrupted", "Interrupted"],
+    ["incompatible", "Incompatible"],
+    ["ambiguous", "Outcome ambiguous"],
+  ] as const)(
+    "renders the %s latest-result state with a safe next action",
+    async (state, label) => {
+      const result = clone<TerminalOperationResult>(partialOperationResult);
+      result.state = state;
+      result.reasonCode = `execution_${state}`;
+      renderReadyApp(
+        operationClientWith({ latest: { state: "available", result } }),
+      );
+
+      expect(
+        await screen.findByRole("heading", { name: label }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Safe next action:/)).toBeInTheDocument();
+    },
+  );
+
   it("does not retry when the enqueue response is lost and reconciles status once", async () => {
     const getStatus = vi
       .fn<OperationClient["getStatus"]>()

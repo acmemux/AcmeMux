@@ -91,12 +91,29 @@ export const partialOperationResult = {
     truncated: false,
   },
   certificates: [
-    { name: "gateway", state: "completed", reasonCode: "completed" },
-    { name: "media", state: "failed", reasonCode: "upstream_failed" },
+    {
+      name: "gateway",
+      state: "completed",
+      reasonCode: "completed",
+      account: "primary",
+      ca: "letsencrypt",
+      challenge: { kind: "http-01", mode: "listener" },
+    },
+    {
+      name: "media",
+      state: "failed",
+      reasonCode: "upstream_failed",
+      account: "primary",
+      ca: "letsencrypt",
+      challenge: { kind: "http-01", mode: "webroot" },
+    },
     {
       name: "router",
       state: "not_attempted",
       reasonCode: "upstream_stopped",
+      account: "primary",
+      ca: "letsencrypt",
+      challenge: { kind: "dns-01", mode: "cloudflare" },
     },
   ],
   inventory: {
@@ -104,6 +121,12 @@ export const partialOperationResult = {
     certificateCount: 2,
     summary: "Native inventory was refreshed after the fail-fast run.",
   },
+  summary: "Some certificate work completed before upstream lego stopped.",
+  nextAction:
+    "Review completed, failed, and ambiguous certificates with current native inventory before deciding whether to run again.",
+  runtime: { identity: "v5.3.1", manifestId: "lego-v5.3.1" },
+  configurationPath: "/srv/lego/.lego.yml",
+  storagePath: "/srv/lego/data",
 } as const;
 
 export const successfulOperationResult = {
@@ -116,9 +139,26 @@ export const successfulOperationResult = {
     truncated: false,
   },
   certificates: [
-    { name: "gateway", state: "completed", reasonCode: "completed" },
-    { name: "media", state: "completed", reasonCode: "completed" },
+    {
+      name: "gateway",
+      state: "completed",
+      reasonCode: "completed",
+      account: "primary",
+      ca: "letsencrypt",
+      challenge: { kind: "http-01", mode: "listener" },
+    },
+    {
+      name: "media",
+      state: "completed",
+      reasonCode: "completed",
+      account: "primary",
+      ca: "letsencrypt",
+      challenge: { kind: "http-01", mode: "webroot" },
+    },
   ],
+  summary: "Upstream lego completed the native workspace evaluation.",
+  nextAction:
+    "Review current certificate health and no further action is required unless the inventory needs attention.",
 } as const;
 
 export const idleOperationClient = {

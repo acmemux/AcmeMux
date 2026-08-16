@@ -7,7 +7,7 @@ GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
 export GOMODCACHE := $(CURDIR)/.cache/go-mod
 
-.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-runtime test-scheduler test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-reporting test-runtime test-scheduler test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -110,6 +110,10 @@ test-filesystem:
 
 test-redaction:
 	go test ./internal/dotenv/... ./internal/redaction/...
+
+test-reporting:
+	go test ./internal/reporting/... ./internal/inventory/... ./internal/jobs/... ./internal/httpapi/...
+	cd web && npm run test -- src/api/workspace.test.ts src/api/operations.test.ts src/app/WorkspacePanel.test.tsx src/app/OperationsPanel.test.tsx
 
 test-configuration: test-nativeconfig test-filesystem test-redaction
 	go test ./internal/httpapi/... ./cmd/acmemux/...

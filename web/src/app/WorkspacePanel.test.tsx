@@ -206,6 +206,7 @@ const certificate: CertificateInventoryItem = {
   dnsNames: ["gateway.home.example", "home.example"],
   issuer: "Let's Encrypt Authority X3",
   expiresAt: "2030-03-31T12:30:00Z",
+  health: "healthy",
   artifact: {
     nativePath: "/srv/lego/data/certificates/gateway.home.example.crt",
     ...pathMetadata,
@@ -227,6 +228,7 @@ const readySnapshot: WorkspaceSnapshot = {
   state: "ready",
   workspace: workspaceEvidence,
   inventory: [certificate],
+  inventoryObservedAt: "2030-01-01T00:00:00Z",
   diagnostics: [],
 };
 
@@ -1406,7 +1408,7 @@ describe("workspace adoption", () => {
     expect(client.adoptCandidate).not.toHaveBeenCalled();
   });
 
-  it("hides prior ready inventory when a bounded refresh fails", async () => {
+  it("marks prior browser inventory stale when a bounded refresh fails", async () => {
     let rejectRefresh: (error: unknown) => void = () => undefined;
     const pendingRefresh = new Promise<WorkspaceSnapshot>((_, reject) => {
       rejectRefresh = reject;
@@ -1465,7 +1467,9 @@ describe("workspace adoption", () => {
       await screen.findByText("Workspace unavailable"),
     ).toBeInTheDocument();
     expect(screen.queryByText("Native workspace ready")).toBeNull();
-    expect(screen.queryByText("gateway.home.example")).toBeNull();
+    expect(screen.getByText("gateway.home.example")).toBeInTheDocument();
+    expect(screen.getByText("Inventory is stale")).toBeInTheDocument();
+    expect(screen.getByText("Stale evidence")).toBeInTheDocument();
     expect(screen.queryByText("1 certificate")).toBeNull();
 
     fireEvent.change(screen.getByLabelText("Effective working directory"), {

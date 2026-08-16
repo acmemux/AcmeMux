@@ -35,7 +35,8 @@ The current product covers:
 - HTTP-01 through an unprivileged listener or an existing webroot;
 - DNS-01 through Azure DNS, Cloudflare, DigitalOcean, DuckDNS, and Amazon Route 53;
 - manual whole-workspace certificate evaluation; and
-- one persistent daily automatic evaluation schedule.
+- one persistent daily automatic evaluation schedule; and
+- current native certificate health with one bounded latest redacted result.
 
 Unsupported native fields and integrations are preserved but block AcmeMux-managed edits and operations. AcmeMux does not offer arbitrary commands, raw YAML editing, multiple users or workspaces, certificate deployment, notifications, or long-term operation history.
 
@@ -50,6 +51,7 @@ Unsupported native fields and integrations are preserved but block AcmeMux-manag
 - [DNS-01 providers](docs/dns-providers.md)
 - [Manual certificate operations](docs/manual-operations.md)
 - [Automatic renewal evaluation](docs/automatic-renewal.md)
+- [Certificate health and latest reporting](docs/certificate-health-and-reporting.md)
 
 ## Support
 

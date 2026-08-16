@@ -180,6 +180,21 @@ test("reports fail-fast partial and not-attempted evidence without hiding ambigu
   await expect(results).toContainText("not attempted");
   await expect(page.getByText("External state may have changed")).toBeVisible();
   await expect(page.getByText(/Do not retry blindly/)).toBeVisible();
+  await expect(page.getByText(/Safe next action:/)).toBeVisible();
+  await expect(results).toContainText("letsencrypt");
+  await expect(results).toContainText("http-01 / listener");
+
+  await page
+    .getByText("Show runtime and native configuration identity")
+    .click();
+  const latestResult = page.locator(".am-operation-result");
+  await expect(latestResult.getByText("v5.3.1", { exact: true })).toBeVisible();
+  await expect(
+    latestResult.getByText("/srv/lego/data", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    latestResult.getByText(/does not back up or deploy/),
+  ).toBeVisible();
 
   await page.getByText("Show redacted upstream transcript").click();
   await expect(page.getByText(/gateway completed/)).toBeVisible();

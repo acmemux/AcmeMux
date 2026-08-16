@@ -92,12 +92,25 @@ const terminalResult: TerminalOperationResult = {
       name: "gateway@example",
       state: "completed",
       reasonCode: "completed",
+      account: "primary",
+      ca: "letsencrypt",
+      challenge: { kind: "http-01", mode: "webroot" },
     },
-    { name: "media", state: "failed", reasonCode: "upstream_failed" },
+    {
+      name: "media",
+      state: "failed",
+      reasonCode: "upstream_failed",
+      account: "primary",
+      ca: "letsencrypt",
+      challenge: { kind: "http-01", mode: "webroot" },
+    },
     {
       name: "router",
       state: "not_attempted",
       reasonCode: "upstream_stopped",
+      account: "primary",
+      ca: "letsencrypt",
+      challenge: { kind: "http-01", mode: "webroot" },
     },
   ],
   inventory: {
@@ -105,6 +118,12 @@ const terminalResult: TerminalOperationResult = {
     certificateCount: 2,
     summary: "Native inventory was refreshed after the operation.",
   },
+  summary: "Some certificate work completed before upstream lego stopped.",
+  nextAction:
+    "Review current native evidence before deciding whether to run again.",
+  runtime: { identity: "v5.3.1", manifestId: "lego-v5.3.1" },
+  configurationPath: "/srv/lego/.lego.yml",
+  storagePath: "/srv/lego/data",
 };
 
 function jsonResponse(value: unknown, init: ResponseInit = {}): Response {

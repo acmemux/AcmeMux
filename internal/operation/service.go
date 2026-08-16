@@ -257,9 +257,20 @@ func requestFromPlan(plan *configuration.ExecutionPlan) jobs.Request {
 	request := jobs.Request{
 		ReviewedEvidenceSHA256: plan.ReviewedEvidenceSHA256,
 		Items:                  make([]string, len(plan.Intent.Certificates)),
+		Details:                make([]jobs.RequestItem, len(plan.Intent.Certificates)),
+		Context: jobs.RequestContext{
+			RuntimeIdentity:   plan.Intent.RuntimeIdentity,
+			RuntimeManifestID: string(plan.Intent.RuntimeManifestID),
+			ConfigurationPath: plan.Intent.ConfigurationPath,
+			StoragePath:       plan.Intent.StoragePath,
+		},
 	}
 	for index, certificate := range plan.Intent.Certificates {
 		request.Items[index] = certificate.Name
+		request.Details[index] = jobs.RequestItem{
+			Name: certificate.Name, Account: certificate.Account, CA: certificate.CA,
+			ChallengeKind: certificate.ChallengeKind, ChallengeMode: certificate.ChallengeMode,
+		}
 	}
 	return request
 }

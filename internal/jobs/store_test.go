@@ -69,7 +69,8 @@ func TestStorePersistsOneBoundedLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Latest() error = %v", err)
 	}
-	if reloaded.ID != finished.ID || reloaded.Output != finished.Output || len(reloaded.Items) != 2 {
+	if reloaded.ID != finished.ID || reloaded.Output != finished.Output || len(reloaded.Items) != 2 ||
+		reloaded.Request.Context.RuntimeIdentity != "v5.3.1" || len(reloaded.Request.Details) != 2 {
 		t.Fatalf("reloaded operation = %#v", reloaded)
 	}
 
@@ -228,5 +229,18 @@ func testRequest(items ...string) Request {
 	if len(items) == 0 {
 		items = []string{"certificate"}
 	}
-	return Request{ReviewedEvidenceSHA256: strings.Repeat("a", 64), Items: items}
+	details := make([]RequestItem, len(items))
+	for index, item := range items {
+		details[index] = RequestItem{
+			Name: item, Account: "primary", CA: "letsencrypt",
+			ChallengeKind: "dns-01", ChallengeMode: "cloudflare",
+		}
+	}
+	return Request{
+		ReviewedEvidenceSHA256: strings.Repeat("a", 64), Items: items, Details: details,
+		Context: RequestContext{
+			RuntimeIdentity: "v5.3.1", RuntimeManifestID: "lego-v5.3.1",
+			ConfigurationPath: "/srv/lego/.lego.yml", StoragePath: "/srv/lego/data",
+		},
+	}
 }
