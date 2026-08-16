@@ -8,6 +8,7 @@ import {
   recoveryConfiguration,
   unsupportedConfiguration,
 } from "./support/configuration";
+import { mockOperations, partialOperationResult } from "./support/operations";
 
 const fullPageSnapshot = {
   animations: "disabled" as const,
@@ -22,6 +23,7 @@ test.describe("wide visual contract", () => {
     await mockSession(page);
     await mockRuntime(page);
     await mockWorkspace(page);
+    await mockOperations(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Certificate operations" }),
@@ -36,6 +38,7 @@ test.describe("wide visual contract", () => {
     await mockSession(page);
     await mockRuntime(page, { initial: supportedRuntime });
     await mockWorkspace(page);
+    await mockOperations(page);
     await page.goto("/");
     await page.getByLabel("Effective working directory").fill("/srv/lego");
     await page.getByRole("button", { name: "Inspect workspace" }).click();
@@ -53,6 +56,7 @@ test.describe("wide visual contract", () => {
     await mockRuntime(page, { initial: supportedRuntime });
     await mockWorkspace(page, { initial: readyWorkspace });
     await mockConfiguration(page);
+    await mockOperations(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Native workspace ready" }),
@@ -69,10 +73,38 @@ test.describe("wide visual contract", () => {
     await mockRuntime(page, { initial: supportedRuntime });
     await mockWorkspace(page, { initial: readyWorkspace });
     await mockConfiguration(page, { initial: unsupportedConfiguration });
+    await mockOperations(page);
     await page.goto("/");
     await expect(page.getByText("Native content unsupported")).toBeVisible();
     await expect(page).toHaveScreenshot(
       "configuration-unsupported-wide.png",
+      fullPageSnapshot,
+    );
+  });
+
+  test("partial manual operation result", async ({ page }) => {
+    await mockSession(page);
+    await mockRuntime(page, { initial: supportedRuntime });
+    await mockWorkspace(page, { initial: readyWorkspace });
+    await mockConfiguration(page);
+    await mockOperations(page, {
+      initialLatest: {
+        state: "available",
+        result: partialOperationResult,
+      },
+    });
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: "Partially completed" }),
+    ).toBeVisible();
+    await expect(page.getByText("Configuration engine ready")).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "Preview manual workspace operation",
+      }),
+    ).toBeEnabled();
+    await expect(page).toHaveScreenshot(
+      "operation-partial-wide.png",
       fullPageSnapshot,
     );
   });
@@ -126,6 +158,7 @@ test.describe("narrow visual contract", () => {
     await mockSession(page);
     await mockRuntime(page);
     await mockWorkspace(page);
+    await mockOperations(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Certificate operations" }),
@@ -141,6 +174,7 @@ test.describe("narrow visual contract", () => {
     await mockRuntime(page, { initial: supportedRuntime });
     await mockWorkspace(page, { initial: readyWorkspace });
     await mockConfiguration(page);
+    await mockOperations(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Native workspace ready" }),
@@ -156,6 +190,7 @@ test.describe("narrow visual contract", () => {
     await mockRuntime(page, { initial: supportedRuntime });
     await mockWorkspace(page, { initial: readyWorkspace });
     await mockConfiguration(page, { initial: recoveryConfiguration });
+    await mockOperations(page);
     await page.goto("/");
     await expect(page.getByText("Recovery required").first()).toBeVisible();
     await expect(page).toHaveScreenshot(

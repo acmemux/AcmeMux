@@ -102,6 +102,10 @@ func (fake *fakeTransactions) snapshot() *workspace.SourceSet {
 			Role: workspace.RoleConfiguration, Reference: fake.configurationPath,
 			Path: fake.configurationPath,
 		},
+		Storage: workspace.PathEvidence{
+			Role: workspace.RoleStorage, Reference: ".lego",
+			Path: filepath.Join(fake.workingDirectory, ".lego"), Safe: true, Exists: true,
+		},
 	}
 	sources := &workspace.SourceSet{
 		Selection: workspace.Selection{Review: review, ReviewedAt: stamp},
@@ -269,7 +273,9 @@ func newTestService(t *testing.T, transactions *fakeTransactions, factory Engine
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := acmeruntime.Observation{}
+	observation := acmeruntime.Observation{
+		Version: acmeruntime.VersionIdentity{Kind: acmeruntime.VersionRelease, Value: "v5.3.1"},
+	}
 	selection := acmeruntime.Selection{
 		Observation: observation, ManifestID: string(compatibility.ManifestLegoV531),
 		ReviewedAt: time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC),

@@ -138,6 +138,7 @@ func newRuntimeHTTPHarness(t *testing.T) *runtimeHTTPHarness {
 		},
 		testWorkspaceDependencies(),
 		testConfigurationDependencies(),
+		testOperationDependencies(),
 		fstest.MapFS{"index.html": {Data: []byte("browser")}},
 		SecurityConfig{PublicOrigin: identityTestOrigin},
 	)
@@ -561,6 +562,7 @@ func TestNewRejectsIncompleteRuntimeDependencies(t *testing.T) {
 				test.dependencies,
 				testWorkspaceDependencies(),
 				testConfigurationDependencies(),
+				testOperationDependencies(),
 				fstest.MapFS{},
 				SecurityConfig{PublicOrigin: testPublicOrigin},
 			)

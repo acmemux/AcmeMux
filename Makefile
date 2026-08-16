@@ -7,7 +7,7 @@ GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
 export GOMODCACHE := $(CURDIR)/.cache/go-mod
 
-.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-browser test-compatibility test-configuration test-filesystem test-identity test-integrations test-inventory test-nativeconfig test-race test-redaction test-runtime test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-race test-redaction test-runtime test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -66,6 +66,19 @@ test-workspace:
 
 test-inventory:
 	go test ./internal/inventory/...
+
+test-broker:
+	go test ./internal/broker/...
+
+test-jobs:
+	go test ./internal/jobs/... ./internal/operation/... ./internal/state/...
+
+test-lego-integration:
+	@test -n "$$ACMEMUX_TEST_LEGO" || (echo "ACMEMUX_TEST_LEGO must name the source-built lego executable" && exit 1)
+	@test -n "$$ACMEMUX_TEST_PEBBLE" || (echo "ACMEMUX_TEST_PEBBLE must name the pinned Pebble executable" && exit 1)
+	@test -n "$$ACMEMUX_TEST_CHALLTESTSRV" || (echo "ACMEMUX_TEST_CHALLTESTSRV must name the pinned challtestsrv executable" && exit 1)
+	@test -n "$$ACMEMUX_TEST_LEGO_SOURCE" || (echo "ACMEMUX_TEST_LEGO_SOURCE must name the upstream lego source snapshot" && exit 1)
+	ACMEMUX_TEST_LEGO_INTEGRATION=1 go test -count=1 -timeout=5m -run '^TestSourceBuiltLegoFileMode$$' ./internal/broker/...
 
 test-integrations:
 	go test ./internal/integrations/...

@@ -9,7 +9,7 @@ const navigation = [
   { label: "Overview", state: "current" },
   { label: "Certificates", state: "planned" },
   { label: "Configuration", state: "planned" },
-  { label: "Operations", state: "planned" },
+  { label: "Operations", state: "available", href: "#manual-operation" },
   { label: "Workspace", state: "planned" },
   { label: "Settings", state: "planned" },
 ] as const;
@@ -17,11 +17,15 @@ const navigation = [
 export function AppShell({
   children,
   isCatalog = false,
+  operationStatus = "Unavailable",
   runtimeStatus = "Not connected",
+  workspaceStatus = "Not adopted",
 }: {
   children: ReactNode;
   isCatalog?: boolean;
+  operationStatus?: string;
   runtimeStatus?: string;
+  workspaceStatus?: string;
 }) {
   const session = useOptionalAuthenticatedSession();
   if (!isCatalog && !session) {
@@ -87,6 +91,13 @@ export function AppShell({
                       </span>
                       <strong>{item.label}</strong>
                     </a>
+                  ) : item.state === "available" ? (
+                    <a href={item.href}>
+                      <span aria-hidden="true">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <strong>{item.label}</strong>
+                    </a>
                   ) : (
                     <span className="is-planned" aria-disabled="true">
                       <span aria-hidden="true">
@@ -112,11 +123,11 @@ export function AppShell({
               </div>
               <div>
                 <dt>Workspace</dt>
-                <dd>Not adopted</dd>
+                <dd>{workspaceStatus}</dd>
               </div>
               <div>
                 <dt>Managed operation</dt>
-                <dd>Unavailable</dd>
+                <dd>{operationStatus}</dd>
               </div>
             </dl>
           </section>

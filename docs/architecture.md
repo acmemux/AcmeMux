@@ -37,12 +37,20 @@ non-root operating-system identity.
 - `internal/configuration` coordinates the reviewed runtime, native sources,
   manifest, preview tokens, candidate validation, transaction, and recovery.
 - `internal/redaction` owns bounded exact-value and curated-field filtering for
-  later broker output; callers remain responsible for supplying every observed
+  broker output; callers remain responsible for supplying every observed
   secret and sensitive field.
+- `internal/broker` owns the one exact no-shell file-mode process contract,
+  bounded environment and output, process-tree lifetime, timeout, termination,
+  and display-safe redacted results.
+- `internal/jobs` owns the latest-only durable manual-operation record and the
+  one service-lifetime worker whose context is independent of browser requests.
+- `internal/operation` owns non-writing whole-workspace review, durable enqueue,
+  execution revalidation, broker coordination, certificate-level result
+  classification, and mandatory native-inventory reconciliation.
 - `internal/state` owns application-only SQLite state and migrations.
 - `internal/webassets` owns the browser build embedded into the executable.
-- `jobs` and `reporting` remain explicit product boundaries for later delivery
-  tasks.
+- `internal/reporting` remains the explicit boundary for the later health and
+  latest-reporting delivery task.
 
 SQLite contains the migration ledger, service metadata, the Argon2id
 administrator verifier, an authentication epoch, and hashed session and expiry
@@ -54,7 +62,11 @@ native-edit journal with transaction phase, target paths, parent placement,
 and staged or active inode metadata. The executable itself, passwords, raw
 session or CSRF tokens, configuration review-token key, native content
 digests, field changes, and credential values are never stored. Certificate
-inventory is refreshed from native evidence and is not persisted.
+inventory is refreshed from native evidence and is not persisted. SQLite also
+contains the one accepted manual-operation scope and its active or latest
+bounded result: stable secret-free reviewed evidence, certificate names,
+phases and times, stable reason codes, redacted output, certificate-level
+states, and inventory reconciliation status. It is not long-term job history.
 Native YAML, provider credentials, EAB secrets, ACME accounts, certificates,
 chains, private keys, archives, and desired configuration do not belong in
 application state.
@@ -127,6 +139,29 @@ same-directory no-replace activation. No workspace selection is stored until
 a fresh inspection proves the active native files and full path boundary.
 Interrupted creation is identified separately in recovery; applied creation
 requires explicit validated adoption because no pre-edit selection exists.
+
+Manual native execution builds on all of these boundaries. A non-writing
+preview shows the exact runtime, native paths, configured certificate targets,
+and possible account, storage, backup, and external ACME effects. An opaque
+token binds that view to the complete current sources. Enqueue replays the
+review, immediately reauthorizes the administrator, and commits the request
+before notifying the worker. The browser does not own operation lifetime;
+disconnect and session expiry after acceptance do not stop it, and no browser
+cancel or automatic retry path exists.
+
+The worker holds the shared workspace lease across preflight inventory,
+direct execution of exactly `--config <absolute-configuration>` from the
+adopted working directory, and terminal reconciliation. The broker uses a
+fixed and integration-allowlisted environment, a 30-minute timeout, bounded
+stdout and stderr, a dedicated process group plus descendant tracking, and a
+five-second `SIGTERM` grace before forced `SIGKILL`. Observed secrets are
+redacted and output is sanitized before crossing into durable jobs state.
+Inventory refresh and runtime, workspace, and source rechecks are mandatory
+after the process; uncertain cleanup, evidence change, or incomplete
+reconciliation stays explicit rather than being converted into success. A
+queued operation can continue after service restart, while a previously
+running operation is interrupted, reconciled, and never replayed. See
+`manual-operations.md`.
 
 The browser shell is composed from authored tokens and semantic components.
 React Aria supplies headless interaction behavior, while the application owns

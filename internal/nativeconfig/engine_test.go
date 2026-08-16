@@ -91,6 +91,46 @@ func TestInspectUsesExactSchemaSemanticModelAndSupportClassification(t *testing.
 	}
 }
 
+func TestObservedSecretsReturnsOnlyManifestOwnedYAMLValues(t *testing.T) {
+	manifest, ok := integrations.CoreManifest(compatibility.ManifestLegoV531)
+	if !ok {
+		t.Fatal("core manifest unavailable")
+	}
+	schema, err := compatibility.Schema(compatibility.ManifestLegoV531)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := NewEngine(compatibility.ManifestLegoV531, schema, manifest, DefaultLimits())
+	clear(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const secret = "TASK08_YAML_SECRET_CANARY"
+	source := []byte(`accounts:
+  first:
+    eab: {kid: public-kid, hmacKey: TASK08_YAML_SECRET_CANARY}
+  second:
+    eab: {kid: another-public-kid, hmacKey: TASK08_YAML_SECRET_CANARY}
+certificates: {}
+unmanaged: TASK08_YAML_SECRET_CANARY
+`)
+	secrets, err := engine.ObservedSecrets(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for index := range secrets {
+			clear(secrets[index])
+		}
+	}()
+	if len(secrets) != 1 || string(secrets[0]) != secret {
+		t.Fatalf("ObservedSecrets() = %#v", secrets)
+	}
+	if bytes.Contains(secrets[0], []byte("public-kid")) {
+		t.Fatal("public field was returned as an observed secret")
+	}
+}
+
 func TestInspectFailsClosedWhenProjectionLimitWouldOmitManagedFields(t *testing.T) {
 	userAgent, err := integrations.NewFieldSpec(integrations.FieldDefinition{
 		ID: "workspace.user_agent", Label: "User agent", Kind: integrations.FieldString,

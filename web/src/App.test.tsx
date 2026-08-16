@@ -6,8 +6,9 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { vi } from "vitest";
+import type { ComponentProps } from "react";
 
-import { App } from "./App";
+import { App as ProductApp } from "./App";
 import {
   SessionRequestError,
   type SessionClient,
@@ -15,6 +16,11 @@ import {
 } from "./api/session";
 import type { RuntimeClient, RuntimeSnapshot } from "./api/runtime";
 import type { WorkspaceClient } from "./api/workspace";
+import { idleOperationClient } from "../tests/support/operations";
+
+function App(props: ComponentProps<typeof ProductApp>) {
+  return <ProductApp operationClient={idleOperationClient} {...props} />;
+}
 
 const unadoptedWorkspaceClient: WorkspaceClient = {
   getWorkspace: vi.fn(async () => ({ state: "unadopted" as const })),

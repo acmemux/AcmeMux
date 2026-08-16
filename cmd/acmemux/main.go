@@ -14,18 +14,23 @@ import (
 	"time"
 
 	"github.com/sgurden-certleap/AcmeMux/internal/appconfig"
+	"github.com/sgurden-certleap/AcmeMux/internal/broker"
 	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
 	"github.com/sgurden-certleap/AcmeMux/internal/configuration"
 	"github.com/sgurden-certleap/AcmeMux/internal/httpapi"
 	"github.com/sgurden-certleap/AcmeMux/internal/identity"
 	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
+	"github.com/sgurden-certleap/AcmeMux/internal/operation"
 	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
 	"github.com/sgurden-certleap/AcmeMux/internal/state"
 	"github.com/sgurden-certleap/AcmeMux/internal/webassets"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
 
-const shutdownTimeout = 10 * time.Second
+// Shutdown covers the HTTP write bound plus broker TERM/KILL and terminal
+// operation persistence. The worker is canceled first, then both components
+// are joined before SQLite is closed.
+const shutdownTimeout = 90 * time.Second
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -121,6 +126,25 @@ func runServer(arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize certificate inventory: %w", err)
 	}
+	operationBroker, err := broker.NewRunner(broker.DefaultPolicy())
+	if err != nil {
+		return fmt.Errorf("initialize constrained lego broker: %w", err)
+	}
+	prepareOperationRuntime := func(ctx context.Context) (operation.PreparedExecutable, error) {
+		return runtimeInspector.PrepareCurrent(ctx, runtimeSelections, func(observation acmeruntime.Observation) (string, bool) {
+			result := compatibility.Classify(observation)
+			return string(result.ManifestID), result.Compatible()
+		})
+	}
+	operationService, err := operation.New(operation.Dependencies{
+		Database: database, Coordinator: workspaceCoordinator, Configuration: configurationService,
+		WorkspaceSelections: workspaceSelections, WorkspaceInspector: workspaceInspector,
+		PrepareRuntime: prepareOperationRuntime, Broker: operationBroker, Inventory: inventoryReader,
+		Policy: operation.DefaultPolicy(),
+	})
+	if err != nil {
+		return fmt.Errorf("initialize durable native operations: %w", err)
+	}
 
 	assets, err := webassets.FS()
 	if err != nil {
@@ -147,6 +171,8 @@ func runServer(arguments []string) error {
 		},
 	}, httpapi.ConfigurationDependencies{
 		Service: configurationService,
+	}, httpapi.OperationDependencies{
+		Service: operationService,
 	}, assets, httpapi.SecurityConfig{
 		PublicOrigin:   config.PublicOrigin,
 		TrustedProxies: config.TrustedProxies,
@@ -166,6 +192,12 @@ func runServer(arguments []string) error {
 	go func() {
 		serveErrors <- server.Serve(listener)
 	}()
+	workerContext, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
+	workerErrors := make(chan error, 1)
+	go func() {
+		workerErrors <- operationService.Run(workerContext)
+	}()
 
 	logger := log.New(os.Stderr, "acmemux: ", log.LstdFlags)
 	logger.Printf("listening on %s for public origin %s", listener.Addr(), config.PublicOrigin)
@@ -173,24 +205,51 @@ func runServer(arguments []string) error {
 	stopContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	var result error
+	serveFinished := false
+	workerFinished := false
 	select {
 	case err = <-serveErrors:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+		serveFinished = true
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			result = fmt.Errorf("serve HTTP: %w", err)
 		}
-		return fmt.Errorf("serve HTTP: %w", err)
+	case err = <-workerErrors:
+		workerFinished = true
+		if err == nil {
+			result = errors.New("native operation worker stopped unexpectedly")
+		} else {
+			result = fmt.Errorf("run native operation worker: %w", err)
+		}
 	case <-stopContext.Done():
 	}
-
+	stopWorker()
 	shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := server.Shutdown(shutdownContext); err != nil {
-		return fmt.Errorf("graceful shutdown: %w", err)
+	if shutdownErr := server.Shutdown(shutdownContext); shutdownErr != nil {
+		result = errors.Join(result, fmt.Errorf("graceful HTTP shutdown: %w", shutdownErr))
 	}
-	if err := <-serveErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("serve HTTP during shutdown: %w", err)
+	if !serveFinished {
+		select {
+		case serveErr := <-serveErrors:
+			if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				result = errors.Join(result, fmt.Errorf("serve HTTP during shutdown: %w", serveErr))
+			}
+		case <-shutdownContext.Done():
+			result = errors.Join(result, errors.New("HTTP server did not stop before shutdown deadline"))
+		}
 	}
-	return nil
+	if !workerFinished {
+		select {
+		case workerErr := <-workerErrors:
+			if workerErr != nil {
+				result = errors.Join(result, fmt.Errorf("stop native operation worker: %w", workerErr))
+			}
+		case <-shutdownContext.Done():
+			result = errors.Join(result, errors.New("native operation worker did not stop before shutdown deadline"))
+		}
+	}
+	return result
 }
 
 func newApplicationHTTPServer(address string, handler http.Handler) *http.Server {

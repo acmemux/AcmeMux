@@ -3,11 +3,13 @@ import { expect, test } from "@playwright/test";
 import { mockSession } from "./support/session";
 import { mockRuntime } from "./support/runtime";
 import { mockWorkspace } from "./support/workspace";
+import { mockOperations } from "./support/operations";
 
 test.beforeEach(async ({ page }) => {
   await mockSession(page);
   await mockRuntime(page);
   await mockWorkspace(page);
+  await mockOperations(page);
 });
 
 test("renders an honest application shell", async ({ page }) => {

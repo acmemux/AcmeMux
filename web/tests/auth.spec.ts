@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { mockSession, mockSessionFailure } from "./support/session";
 import { mockRuntime } from "./support/runtime";
 import { mockWorkspace } from "./support/workspace";
+import { mockOperations } from "./support/operations";
 
 test("uninitialized service offers only local bootstrap guidance", async ({
   page,
@@ -41,6 +42,7 @@ test("successful sign-in and logout transition through server state", async ({
   await mockSession(page, "signed_out");
   await mockRuntime(page);
   await mockWorkspace(page);
+  await mockOperations(page);
   await page.goto("/");
 
   await page.getByLabel("Administrator password").fill("test-only-password");

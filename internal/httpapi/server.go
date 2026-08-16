@@ -26,6 +26,7 @@ func New(
 	runtimeDependencies RuntimeDependencies,
 	workspaceDependencies WorkspaceDependencies,
 	configurationDependencies ConfigurationDependencies,
+	operationDependencies OperationDependencies,
 	assets fs.FS,
 	config SecurityConfig,
 ) (http.Handler, error) {
@@ -49,6 +50,10 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	operationAPI, err := newOperationEndpoints(identityAPI, operationDependencies)
+	if err != nil {
+		return nil, err
+	}
 	multiplexer := http.NewServeMux()
 	multiplexer.HandleFunc("GET /healthz", func(response http.ResponseWriter, _ *http.Request) {
 		writeJSON(response, http.StatusOK, map[string]string{"status": "healthy"})
@@ -66,6 +71,7 @@ func New(
 	runtimeAPI.register(multiplexer)
 	workspaceAPI.register(multiplexer)
 	configurationAPI.register(multiplexer)
+	operationAPI.register(multiplexer)
 	multiplexer.HandleFunc("/api", apiNotFound)
 	multiplexer.HandleFunc("/api/", apiNotFound)
 	multiplexer.Handle("/", browserHandler(assets))

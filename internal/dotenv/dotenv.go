@@ -227,6 +227,21 @@ func (document *Document) ValidatePresence(key string, validate func([]byte) boo
 	return true, validate(value)
 }
 
+// ValueCopy returns a defensive copy of one allowlisted decoded value for a
+// trusted in-process consumer such as the operation redactor. The caller owns
+// the returned buffer and must clear it. Values are never suitable for logs,
+// persistence, diagnostics, or HTTP presentation.
+func (document *Document) ValueCopy(key string) ([]byte, bool) {
+	if document == nil {
+		return nil, false
+	}
+	value, present := document.values[key]
+	if !present {
+		return nil, false
+	}
+	return slices.Clone(value), true
+}
+
 // Apply returns a complete candidate while preserving every unedited byte.
 func (document *Document) Apply(changes []Change) ([]byte, []Summary, error) {
 	if document == nil || document.raw == nil {

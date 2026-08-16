@@ -42,8 +42,8 @@ func TestOpenCreatesRestrictiveMigratedState(t *testing.T) {
 	if err := database.connection.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&migrationsApplied); err != nil {
 		t.Fatalf("query migration ledger: %v", err)
 	}
-	if migrationsApplied != 7 {
-		t.Fatalf("migration count = %d, want 7", migrationsApplied)
+	if migrationsApplied != 8 {
+		t.Fatalf("migration count = %d, want 8", migrationsApplied)
 	}
 	for _, prohibited := range []string{"credential", "certificate", "private_key", "native_config", "account_material"} {
 		var count int
@@ -53,6 +53,45 @@ func TestOpenCreatesRestrictiveMigratedState(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("schema unexpectedly contains %q", prohibited)
 		}
+	}
+}
+
+func TestManualOperationMigrationCreatesBoundedLatestOnlySchema(t *testing.T) {
+	t.Parallel()
+
+	database, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	for _, table := range []string{"operation_latest", "operation_item_result"} {
+		var definition string
+		if err := database.connection.QueryRow(
+			"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", table,
+		).Scan(&definition); err != nil {
+			t.Fatalf("inspect %s schema: %v", table, err)
+		}
+		lower := strings.ToLower(definition)
+		for _, prohibited := range []string{"credential", "private_key", "native_config", "account_material"} {
+			if strings.Contains(lower, prohibited) {
+				t.Fatalf("%s schema unexpectedly contains %q", table, prohibited)
+			}
+		}
+	}
+
+	if _, err := database.connection.Exec(`INSERT INTO operation_latest (
+        singleton_id, operation_id, kind, state, phase, requested_at_utc,
+        started_at_utc, finished_at_utc, updated_at_utc, reason_code,
+        may_have_changed, inventory_state, inventory_code, redacted_output,
+        output_truncated, inventory_certificate_count
+    ) VALUES (
+        1, '0123456789abcdef0123456789abcdef', 'manual', 'succeeded', '',
+        '2026-08-16T12:00:00Z', '2026-08-16T12:00:01Z',
+        '2026-08-16T12:00:02Z', '2026-08-16T12:00:02Z', 'completed',
+        1, 'refreshed', 'inventory_refreshed', ?, 0, 1
+    )`, strings.Repeat("x", 262145)); err == nil {
+		t.Fatal("operation_latest accepted output above its byte bound")
 	}
 }
 

@@ -6,8 +6,9 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { vi } from "vitest";
+import type { ComponentProps } from "react";
 
-import { App } from "../App";
+import { App as ProductApp } from "../App";
 import {
   RuntimeRequestError,
   type RuntimeCandidate,
@@ -18,6 +19,11 @@ import {
 import type { SessionClient } from "../api/session";
 import type { WorkspaceClient } from "../api/workspace";
 import { RuntimePanel, type RuntimeController } from "./RuntimePanel";
+import { idleOperationClient } from "../../tests/support/operations";
+
+function App(props: ComponentProps<typeof ProductApp>) {
+  return <ProductApp operationClient={idleOperationClient} {...props} />;
+}
 
 const evidence: RuntimeEvidence = {
   canonicalPath: "/usr/local/bin/lego",

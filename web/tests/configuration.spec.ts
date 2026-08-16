@@ -10,11 +10,13 @@ import {
 import { mockRuntime, supportedRuntime } from "./support/runtime";
 import { mockSession } from "./support/session";
 import { mockWorkspace, readyWorkspace } from "./support/workspace";
+import { mockOperations } from "./support/operations";
 
 test.beforeEach(async ({ page }) => {
   await mockSession(page);
   await mockRuntime(page, { initial: supportedRuntime });
   await mockWorkspace(page, { initial: readyWorkspace });
+  await mockOperations(page);
 });
 
 test("shows a secret-safe native configuration projection", async ({

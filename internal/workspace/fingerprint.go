@@ -16,6 +16,22 @@ func ReviewFingerprint(review Review) string {
 	return reviewFingerprint(review, reviewFingerprintDomain, writePathFingerprint)
 }
 
+// ExecutionReviewFingerprint binds stable workspace security identity for a
+// durable manual-operation request. Directory size/times and link counts are
+// excluded because native child creation changes them without replacing the
+// selected directory; device/inode/mode/owner/access and all component
+// identities remain bound.
+func ExecutionReviewFingerprint(review Review) string {
+	return reviewFingerprint(review, "acmemux-workspace-execution-review-v1", writeExecutionPathFingerprint)
+}
+
+func writeExecutionPathFingerprint(digest fingerprintWriter, evidence PathEvidence) {
+	if evidence.Type == PathTypeDirectory {
+		evidence.NLink = 0
+	}
+	writePathFingerprint(digest, evidence)
+}
+
 func legacyReviewFingerprintV1(review Review) string {
 	return reviewFingerprint(review, "acmemux-workspace-review-v1", writePathFingerprintV1)
 }

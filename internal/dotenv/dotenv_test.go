@@ -26,6 +26,27 @@ func TestParseProjectsPresenceWithoutValues(t *testing.T) {
 	}
 }
 
+func TestValueCopyIsOwnedAndClearedIndependently(t *testing.T) {
+	document, err := Parse([]byte("API_TOKEN='secret-value'\n"), []string{"API_TOKEN"}, DefaultPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, present := document.ValueCopy("API_TOKEN")
+	if !present || string(value) != "secret-value" {
+		t.Fatalf("ValueCopy() = %q, %v", value, present)
+	}
+	clear(value)
+	again, present := document.ValueCopy("API_TOKEN")
+	if !present || string(again) != "secret-value" {
+		t.Fatalf("second ValueCopy() = %q, %v", again, present)
+	}
+	clear(again)
+	document.Clear()
+	if value, present := document.ValueCopy("API_TOKEN"); present || value != nil {
+		t.Fatalf("ValueCopy() after Clear = %q, %v", value, present)
+	}
+}
+
 func TestApplyPreservesUneditedTextAndNewlineConvention(t *testing.T) {
 	t.Parallel()
 	source := []byte("# retained\r\nexport API_TOKEN = 'old' # style\r\nZONE_ID: old-zone\r\n")
