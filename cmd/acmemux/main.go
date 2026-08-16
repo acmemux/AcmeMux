@@ -15,6 +15,7 @@ import (
 
 	"github.com/sgurden-certleap/AcmeMux/internal/appconfig"
 	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
+	"github.com/sgurden-certleap/AcmeMux/internal/configuration"
 	"github.com/sgurden-certleap/AcmeMux/internal/httpapi"
 	"github.com/sgurden-certleap/AcmeMux/internal/identity"
 	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
@@ -83,6 +84,35 @@ func runServer(arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize workspace selection store: %w", err)
 	}
+	workspaceCoordinator, err := workspace.NewCoordinator(filepath.Join(config.StateDirectory, "workspace.lock"))
+	if err != nil {
+		return fmt.Errorf("initialize native workspace coordinator: %w", err)
+	}
+	editJournal, err := workspace.NewJournalStore(database)
+	if err != nil {
+		return fmt.Errorf("initialize native edit journal: %w", err)
+	}
+	transactions, err := workspace.NewTransactionManager(workspaceInspector, workspaceSelections, editJournal, workspaceCoordinator)
+	if err != nil {
+		return fmt.Errorf("initialize native edit transactions: %w", err)
+	}
+	configurationService, err := configuration.New(configuration.Dependencies{
+		RuntimeSelections: runtimeSelections,
+		RuntimeInspector:  runtimeInspector,
+		Classify:          compatibility.Classify,
+		Coordinator:       workspaceCoordinator,
+		Transactions:      transactions,
+	})
+	if err != nil {
+		return fmt.Errorf("initialize native configuration service: %w", err)
+	}
+	acquireWorkspace := func(ctx context.Context, purpose workspace.Purpose) (func() error, error) {
+		lease, acquireErr := workspaceCoordinator.TryAcquire(ctx, purpose)
+		if acquireErr != nil {
+			return nil, acquireErr
+		}
+		return lease.Release, nil
+	}
 	inventoryDirectory, err := prepareInventoryDirectory(config.StateDirectory)
 	if err != nil {
 		return fmt.Errorf("prepare private inventory directory: %w", err)
@@ -98,19 +128,25 @@ func runServer(arguments []string) error {
 	}
 
 	handler, err := httpapi.New(database, identityService, httpapi.RuntimeDependencies{
-		Inspector:  runtimeInspector,
-		Selections: runtimeSelections,
-		Classify:   compatibility.Classify,
+		Inspector:        runtimeInspector,
+		Selections:       runtimeSelections,
+		Classify:         compatibility.Classify,
+		AcquireWorkspace: acquireWorkspace,
+		EditJournal:      editJournal,
 	}, httpapi.WorkspaceDependencies{
-		Inspector:  workspaceInspector,
-		Selections: workspaceSelections,
-		Inventory:  inventoryReader,
+		Inspector:        workspaceInspector,
+		Selections:       workspaceSelections,
+		Inventory:        inventoryReader,
+		AcquireWorkspace: acquireWorkspace,
+		EditJournal:      editJournal,
 		PrepareRuntime: func(ctx context.Context) (inventory.PreparedExecutable, error) {
 			return runtimeInspector.PrepareCurrent(ctx, runtimeSelections, func(observation acmeruntime.Observation) (string, bool) {
 				result := compatibility.Classify(observation)
 				return string(result.ManifestID), result.Compatible()
 			})
 		},
+	}, httpapi.ConfigurationDependencies{
+		Service: configurationService,
 	}, assets, httpapi.SecurityConfig{
 		PublicOrigin:   config.PublicOrigin,
 		TrustedProxies: config.TrustedProxies,

@@ -42,8 +42,8 @@ func TestOpenCreatesRestrictiveMigratedState(t *testing.T) {
 	if err := database.connection.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&migrationsApplied); err != nil {
 		t.Fatalf("query migration ledger: %v", err)
 	}
-	if migrationsApplied != 5 {
-		t.Fatalf("migration count = %d, want 5", migrationsApplied)
+	if migrationsApplied != 6 {
+		t.Fatalf("migration count = %d, want 6", migrationsApplied)
 	}
 	for _, prohibited := range []string{"credential", "certificate", "private_key", "native_config", "account_material"} {
 		var count int
@@ -53,6 +53,70 @@ func TestOpenCreatesRestrictiveMigratedState(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("schema unexpectedly contains %q", prohibited)
 		}
+	}
+}
+
+func TestNativeEditMigrationCreatesSecretFreeRecoverySchema(t *testing.T) {
+	t.Parallel()
+
+	database, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	for _, table := range []string{"workspace_edit_journal", "workspace_edit_journal_file"} {
+		var definition string
+		if err := database.connection.QueryRow(
+			"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", table,
+		).Scan(&definition); err != nil {
+			t.Fatalf("inspect %s schema: %v", table, err)
+		}
+		columns, err := database.connection.Query("PRAGMA table_info(" + table + ")")
+		if err != nil {
+			t.Fatalf("inspect %s columns: %v", table, err)
+		}
+		for columns.Next() {
+			var (
+				columnID     int
+				name         string
+				columnType   string
+				notNull      int
+				defaultValue sql.NullString
+				primaryKey   int
+			)
+			if err := columns.Scan(&columnID, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+				columns.Close()
+				t.Fatalf("read %s columns: %v", table, err)
+			}
+			for _, prohibited := range []string{"content", "hash", "sha", "secret", "yaml", "value", "token"} {
+				if strings.Contains(strings.ToLower(name), prohibited) {
+					columns.Close()
+					t.Fatalf("%s schema contains prohibited recovery field %q", table, name)
+				}
+			}
+		}
+		if err := columns.Err(); err != nil {
+			columns.Close()
+			t.Fatalf("read %s columns: %v", table, err)
+		}
+		columns.Close()
+	}
+
+	rows, err := database.connection.Query("PRAGMA foreign_key_list(workspace_edit_journal_file)")
+	if err != nil {
+		t.Fatalf("inspect native-edit foreign key: %v", err)
+	}
+	defer rows.Close()
+	foreignKeys := 0
+	for rows.Next() {
+		foreignKeys++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read native-edit foreign key: %v", err)
+	}
+	if foreignKeys != 1 {
+		t.Fatalf("native-edit foreign-key columns = %d, want 1", foreignKeys)
 	}
 }
 

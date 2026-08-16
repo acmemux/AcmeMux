@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { mockRuntime, supportedRuntime } from "./support/runtime";
 import { mockSession } from "./support/session";
+import { mockConfiguration } from "./support/configuration";
 import {
   mockWorkspace,
   readyWorkspace,
@@ -11,6 +12,7 @@ import {
 
 test.beforeEach(async ({ page }) => {
   await mockSession(page);
+  await mockConfiguration(page);
 });
 
 test("reviews every native path before adopting a conventional workspace", async ({

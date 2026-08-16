@@ -18,6 +18,7 @@ import (
 	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
 	"github.com/sgurden-certleap/AcmeMux/internal/identity"
 	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
+	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
 
 const (
@@ -52,10 +53,12 @@ type RuntimeClassifier func(acmeruntime.Observation) compatibility.Result
 // RuntimeDependencies are the runtime capabilities required by the HTTP API.
 // They are explicit so tests cannot accidentally invoke a host executable.
 type RuntimeDependencies struct {
-	Inspector  RuntimeInspector
-	Selections RuntimeSelections
-	Classify   RuntimeClassifier
-	Now        func() time.Time
+	Inspector        RuntimeInspector
+	Selections       RuntimeSelections
+	Classify         RuntimeClassifier
+	AcquireWorkspace WorkspaceLeaseFunc
+	EditJournal      NativeEditJournal
+	Now              func() time.Time
 }
 
 func (dependencies RuntimeDependencies) validate() (RuntimeDependencies, error) {
@@ -68,6 +71,12 @@ func (dependencies RuntimeDependencies) validate() (RuntimeDependencies, error) 
 	if dependencies.Classify == nil {
 		return RuntimeDependencies{}, errors.New("runtime compatibility classifier is required")
 	}
+	if dependencies.AcquireWorkspace == nil {
+		return RuntimeDependencies{}, errors.New("runtime workspace coordinator is required")
+	}
+	if dependencies.EditJournal == nil {
+		return RuntimeDependencies{}, errors.New("runtime native edit journal is required")
+	}
 	if dependencies.Now == nil {
 		dependencies.Now = time.Now
 	}
@@ -79,6 +88,8 @@ type runtimeEndpoints struct {
 	inspector  RuntimeInspector
 	selections RuntimeSelections
 	classify   RuntimeClassifier
+	acquire    WorkspaceLeaseFunc
+	journal    NativeEditJournal
 	now        func() time.Time
 }
 
@@ -184,6 +195,8 @@ func newRuntimeEndpoints(identityAPI *identityEndpoints, dependencies RuntimeDep
 		inspector:  validated.Inspector,
 		selections: validated.Selections,
 		classify:   validated.Classify,
+		acquire:    validated.AcquireWorkspace,
+		journal:    validated.EditJournal,
 		now:        validated.Now,
 	}, nil
 }
@@ -313,6 +326,14 @@ func (endpoints *runtimeEndpoints) adoptRuntime(response http.ResponseWriter, re
 		!runtimeDigestPattern.MatchString(payload.ReviewedEvidenceSHA256) ||
 		!validManifestID(payload.ReviewedManifestID) {
 		writeInvalidRuntimeRequest(response)
+		return
+	}
+	release, ok := acquireWorkspaceLease(response, request, endpoints.acquire, workspace.PurposeSave)
+	if !ok {
+		return
+	}
+	defer func() { _ = release() }()
+	if !requireClearNativeEditJournal(response, request, endpoints.journal) {
 		return
 	}
 

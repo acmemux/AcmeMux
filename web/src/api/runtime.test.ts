@@ -570,6 +570,30 @@ describe("runtime client", () => {
     expect(String(error)).not.toContain("secret-bearing");
   });
 
+  it("preserves a native configuration recovery conflict", async () => {
+    const client = createRuntimeClient({
+      fetch: vi.fn(async () =>
+        jsonResponse(
+          {
+            error: {
+              code: "recovery_required",
+              message: "Do not reflect recovery journal details.",
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+      readCookies: () => "__Host-acmemux_csrf=csrf-token",
+    });
+
+    const error = await client
+      .inspectCandidate("/usr/local/bin/lego")
+      .catch((value) => value);
+    expect(error).toBeInstanceOf(RuntimeRequestError);
+    expect(error).toMatchObject({ code: "recovery_required", status: 409 });
+    expect(String(error)).not.toContain("recovery journal details");
+  });
+
   it.each([
     {
       status: 401,
@@ -590,6 +614,11 @@ describe("runtime client", () => {
       status: 503,
       bodyCode: "authentication_required",
       expected: "service_unavailable",
+    },
+    {
+      status: 429,
+      bodyCode: "service_busy",
+      expected: "service_busy",
     },
     {
       status: 400,

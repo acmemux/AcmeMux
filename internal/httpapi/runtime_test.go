@@ -16,6 +16,7 @@ import (
 	"github.com/sgurden-certleap/AcmeMux/internal/identity"
 	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
 	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
 
 const runtimeTestManifest = "lego-v5.3.1"
@@ -77,8 +78,12 @@ type runtimeHTTPHarness struct {
 	csrf       string
 	inspector  *runtimeInspectorStub
 	selections *runtimeSelectionsStub
+	journal    *nativeEditJournalStub
 	decision   compatibility.Result
 	service    *identity.Service
+	leaseErr   error
+	purposes   []workspace.Purpose
+	releases   int
 }
 
 func newRuntimeHTTPHarness(t *testing.T) *runtimeHTTPHarness {
@@ -103,6 +108,7 @@ func newRuntimeHTTPHarness(t *testing.T) *runtimeHTTPHarness {
 			verifyObservation:  observation,
 		},
 		selections: &runtimeSelectionsStub{},
+		journal:    &nativeEditJournalStub{},
 		decision: compatibility.Result{
 			Code:       compatibility.CodeCompatible,
 			ManifestID: compatibility.ManifestLegoV531,
@@ -114,12 +120,24 @@ func newRuntimeHTTPHarness(t *testing.T) *runtimeHTTPHarness {
 		RuntimeDependencies{
 			Inspector:  harness.inspector,
 			Selections: harness.selections,
+			AcquireWorkspace: func(_ context.Context, purpose workspace.Purpose) (func() error, error) {
+				harness.purposes = append(harness.purposes, purpose)
+				if harness.leaseErr != nil {
+					return nil, harness.leaseErr
+				}
+				return func() error {
+					harness.releases++
+					return nil
+				}, nil
+			},
+			EditJournal: harness.journal,
 			Classify: func(acmeruntime.Observation) compatibility.Result {
 				return harness.decision
 			},
 			Now: func() time.Time { return time.Date(2030, 2, 3, 4, 5, 6, 7, time.UTC) },
 		},
 		testWorkspaceDependencies(),
+		testConfigurationDependencies(),
 		fstest.MapFS{"index.html": {Data: []byte("browser")}},
 		SecurityConfig{PublicOrigin: identityTestOrigin},
 	)
@@ -241,6 +259,9 @@ func TestRuntimeHTTPReviewAdoptAndReverifyFlow(t *testing.T) {
 	}
 	if len(harness.selections.saves) != 1 {
 		t.Fatalf("saved selections = %d, want 1", len(harness.selections.saves))
+	}
+	if len(harness.purposes) != 1 || harness.purposes[0] != workspace.PurposeSave || harness.releases != 1 {
+		t.Fatalf("workspace leases = %v, releases = %d", harness.purposes, harness.releases)
 	}
 	saved := harness.selections.saves[0]
 	if saved.ManifestID != runtimeTestManifest || saved.Observation.File.SHA256 != strings.Repeat("a", 64) || saved.ReviewedAt != time.Date(2030, 2, 3, 4, 5, 6, 7, time.UTC) {
@@ -417,6 +438,36 @@ func TestRuntimeHTTPInspectionBusyIsRetryableAndNeverBlamesTheExecutable(t *test
 	}
 }
 
+func TestRuntimeHTTPWorkspaceContentionBlocksAdoptionBeforeInspection(t *testing.T) {
+	harness := newRuntimeHTTPHarness(t)
+	harness.leaseErr = workspace.ErrWorkspaceBusy
+	review := acmeruntime.ReviewFingerprint(harness.inspector.inspectObservation, runtimeTestManifest)
+	response := harness.request(t, http.MethodPut, "/api/v1/runtime", runtimeAdoptionBody(strings.Repeat("a", 64), runtimeTestManifest, review), true)
+	assertAPIError(t, response, http.StatusTooManyRequests, "service_busy")
+	if len(harness.purposes) != 1 || harness.purposes[0] != workspace.PurposeSave ||
+		harness.releases != 0 || len(harness.inspector.inspectPaths) != 0 || len(harness.selections.saves) != 0 {
+		t.Fatalf("contention effects: purposes=%v releases=%d inspections=%d saves=%d", harness.purposes, harness.releases, len(harness.inspector.inspectPaths), len(harness.selections.saves))
+	}
+}
+
+func TestRuntimeHTTPPendingNativeEditRecoveryBlocksAdoptionBeforeInspection(t *testing.T) {
+	harness := newRuntimeHTTPHarness(t)
+	harness.journal.pending = true
+	review := acmeruntime.ReviewFingerprint(harness.inspector.inspectObservation, runtimeTestManifest)
+
+	response := harness.request(t, http.MethodPut, "/api/v1/runtime", runtimeAdoptionBody(strings.Repeat("a", 64), runtimeTestManifest, review), true)
+
+	assertAPIError(t, response, http.StatusConflict, "recovery_required")
+	if strings.TrimSpace(response.Body.String()) != `{"error":{"code":"recovery_required","message":"Resolve the interrupted native configuration edit before changing the selected runtime or workspace."}}` {
+		t.Fatalf("recovery response = %s", response.Body.String())
+	}
+	if harness.journal.loads != 1 || len(harness.purposes) != 1 || harness.purposes[0] != workspace.PurposeSave ||
+		harness.releases != 1 || len(harness.inspector.inspectPaths) != 0 || len(harness.selections.saves) != 0 {
+		t.Fatalf("recovery effects: loads=%d purposes=%v releases=%d inspections=%d saves=%d",
+			harness.journal.loads, harness.purposes, harness.releases, len(harness.inspector.inspectPaths), len(harness.selections.saves))
+	}
+}
+
 func TestRuntimeHTTPRevalidatesSessionImmediatelyBeforeAdoption(t *testing.T) {
 	harness := newRuntimeHTTPHarness(t)
 	harness.inspector.inspectHook = func() {
@@ -497,9 +548,11 @@ func TestNewRejectsIncompleteRuntimeDependencies(t *testing.T) {
 		name         string
 		dependencies RuntimeDependencies
 	}{
-		{name: "missing inspector", dependencies: RuntimeDependencies{Selections: valid.Selections, Classify: valid.Classify}},
-		{name: "missing selections", dependencies: RuntimeDependencies{Inspector: valid.Inspector, Classify: valid.Classify}},
-		{name: "missing classifier", dependencies: RuntimeDependencies{Inspector: valid.Inspector, Selections: valid.Selections}},
+		{name: "missing inspector", dependencies: RuntimeDependencies{Selections: valid.Selections, Classify: valid.Classify, AcquireWorkspace: valid.AcquireWorkspace, EditJournal: valid.EditJournal}},
+		{name: "missing selections", dependencies: RuntimeDependencies{Inspector: valid.Inspector, Classify: valid.Classify, AcquireWorkspace: valid.AcquireWorkspace, EditJournal: valid.EditJournal}},
+		{name: "missing classifier", dependencies: RuntimeDependencies{Inspector: valid.Inspector, Selections: valid.Selections, AcquireWorkspace: valid.AcquireWorkspace, EditJournal: valid.EditJournal}},
+		{name: "missing coordinator", dependencies: RuntimeDependencies{Inspector: valid.Inspector, Selections: valid.Selections, Classify: valid.Classify, EditJournal: valid.EditJournal}},
+		{name: "missing edit journal", dependencies: RuntimeDependencies{Inspector: valid.Inspector, Selections: valid.Selections, Classify: valid.Classify, AcquireWorkspace: valid.AcquireWorkspace}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := New(
@@ -507,6 +560,7 @@ func TestNewRejectsIncompleteRuntimeDependencies(t *testing.T) {
 				sharedTestIdentity(t),
 				test.dependencies,
 				testWorkspaceDependencies(),
+				testConfigurationDependencies(),
 				fstest.MapFS{},
 				SecurityConfig{PublicOrigin: testPublicOrigin},
 			)

@@ -202,6 +202,7 @@ func newIdentityHTTPTest(t *testing.T) (*state.DB, *identity.Service, http.Handl
 		service,
 		testRuntimeDependencies(),
 		testWorkspaceDependencies(),
+		testConfigurationDependencies(),
 		fstest.MapFS{"index.html": {Data: []byte("<h1>AcmeMux</h1>")}},
 		SecurityConfig{PublicOrigin: identityTestOrigin},
 	)

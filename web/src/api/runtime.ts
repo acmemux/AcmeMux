@@ -137,6 +137,8 @@ export type RuntimeErrorCode =
   | "request_not_allowed"
   | "invalid_request"
   | "runtime_changed"
+  | "recovery_required"
+  | "service_busy"
   | "service_unavailable"
   | "invalid_response"
   | "network_failure";
@@ -244,6 +246,8 @@ const knownErrorCodes = new Set<RuntimeErrorCode>([
   "request_not_allowed",
   "invalid_request",
   "runtime_changed",
+  "recovery_required",
+  "service_busy",
   "service_unavailable",
 ]);
 
@@ -257,6 +261,10 @@ function runtimeErrorMessage(code: RuntimeErrorCode): string {
       return "The runtime request was invalid.";
     case "runtime_changed":
       return "The executable changed before it could be adopted.";
+    case "recovery_required":
+      return "Native configuration recovery must be resolved before changing the runtime.";
+    case "service_busy":
+      return "Another native workspace action is in progress.";
     case "service_unavailable":
     case "network_failure":
       return "Runtime status is unavailable.";
@@ -803,6 +811,8 @@ function fallbackCode(status: number): RuntimeErrorCode {
       return "request_not_allowed";
     case 409:
       return "runtime_changed";
+    case 429:
+      return "service_busy";
     case 503:
       return "service_unavailable";
     default:

@@ -103,10 +103,14 @@ type workspaceHTTPHarness struct {
 	service      *identity.Service
 	inspector    *workspaceInspectorStub
 	selections   *workspaceSelectionsStub
+	journal      *nativeEditJournalStub
 	inventory    *workspaceInventoryStub
 	prepareErr   error
 	prepared     []*preparedWorkspaceStub
 	prepareCount int
+	leaseErr     error
+	purposes     []workspace.Purpose
+	releases     int
 }
 
 func newWorkspaceHTTPHarness(t *testing.T) *workspaceHTTPHarness {
@@ -128,12 +132,24 @@ func newWorkspaceHTTPHarness(t *testing.T) *workspaceHTTPHarness {
 		service:    service,
 		inspector:  &workspaceInspectorStub{inspectReview: review, verifyReview: review},
 		selections: &workspaceSelectionsStub{},
+		journal:    &nativeEditJournalStub{},
 		inventory:  &workspaceInventoryStub{},
 	}
 	dependencies := WorkspaceDependencies{
 		Inspector:  harness.inspector,
 		Selections: harness.selections,
 		Inventory:  harness.inventory,
+		AcquireWorkspace: func(_ context.Context, purpose workspace.Purpose) (func() error, error) {
+			harness.purposes = append(harness.purposes, purpose)
+			if harness.leaseErr != nil {
+				return nil, harness.leaseErr
+			}
+			return func() error {
+				harness.releases++
+				return nil
+			}, nil
+		},
+		EditJournal: harness.journal,
 		PrepareRuntime: func(context.Context) (inventory.PreparedExecutable, error) {
 			harness.prepareCount++
 			if harness.prepareErr != nil {
@@ -150,6 +166,7 @@ func newWorkspaceHTTPHarness(t *testing.T) *workspaceHTTPHarness {
 		service,
 		testRuntimeDependencies(),
 		dependencies,
+		testConfigurationDependencies(),
 		fstest.MapFS{"index.html": {Data: []byte("browser")}},
 		SecurityConfig{PublicOrigin: identityTestOrigin},
 	)
@@ -186,6 +203,9 @@ func TestWorkspaceGetUnadoptedUsesExactMinimalState(t *testing.T) {
 	if harness.prepareCount != 0 {
 		t.Fatal("unadopted workspace prepared a runtime")
 	}
+	if len(harness.purposes) != 1 || harness.purposes[0] != workspace.PurposeInventory || harness.releases != 1 {
+		t.Fatalf("workspace leases = %v, releases = %d", harness.purposes, harness.releases)
+	}
 }
 
 func TestWorkspaceCandidateMapsCompleteBoundEvidenceWithoutRawDetail(t *testing.T) {
@@ -221,6 +241,9 @@ func TestWorkspaceCandidateMapsCompleteBoundEvidenceWithoutRawDetail(t *testing.
 	}
 	if len(harness.inspector.requests) != 1 || harness.inspector.requests[0].ConfigurationPath != "" {
 		t.Fatalf("inspector requests = %#v", harness.inspector.requests)
+	}
+	if len(harness.purposes) != 1 || harness.purposes[0] != workspace.PurposeRead || harness.releases != 1 {
+		t.Fatalf("workspace leases = %v, releases = %d", harness.purposes, harness.releases)
 	}
 	if len(harness.prepared) != 1 || harness.prepared[0].closed != 1 {
 		t.Fatalf("prepared handles = %#v", harness.prepared)
@@ -373,6 +396,9 @@ func TestWorkspaceAdoptionReinspectsInventoriesReauthorizesAndSaves(t *testing.T
 	if got := harness.selections.saves[0].ReviewedAt; !got.Equal(time.Date(2031, 2, 3, 4, 5, 6, 7, time.UTC)) {
 		t.Fatalf("ReviewedAt = %s", got)
 	}
+	if len(harness.purposes) != 1 || harness.purposes[0] != workspace.PurposeInventory || harness.releases != 1 {
+		t.Fatalf("workspace leases = %v, releases = %d", harness.purposes, harness.releases)
+	}
 
 	changed := harness.request(t, http.MethodPut, "/api/v1/workspace", `{"workingDirectory":"/srv/lego","configurationPath":"/srv/lego/.lego.yml","reviewedEvidenceSha256":"`+strings.Repeat("a", 64)+`"}`, true)
 	assertAPIError(t, changed, http.StatusConflict, "workspace_changed")
@@ -517,6 +543,37 @@ func TestWorkspaceRuntimeAndInventoryFailuresAreBounded(t *testing.T) {
 	})
 }
 
+func TestWorkspaceContentionBlocksInspectionBeforeNativeWork(t *testing.T) {
+	harness := newWorkspaceHTTPHarness(t)
+	harness.leaseErr = workspace.ErrWorkspaceBusy
+	response := harness.request(t, http.MethodPost, "/api/v1/workspace/candidates", `{"workingDirectory":"/srv/lego","configurationPath":null}`, true)
+	assertAPIError(t, response, http.StatusTooManyRequests, "service_busy")
+	if len(harness.purposes) != 1 || harness.purposes[0] != workspace.PurposeRead || harness.releases != 0 ||
+		harness.prepareCount != 0 || len(harness.inspector.requests) != 0 {
+		t.Fatalf("contention effects: purposes=%v releases=%d prepares=%d inspections=%d", harness.purposes, harness.releases, harness.prepareCount, len(harness.inspector.requests))
+	}
+}
+
+func TestWorkspacePendingNativeEditRecoveryBlocksAdoptionBeforeNativeWork(t *testing.T) {
+	harness := newWorkspaceHTTPHarness(t)
+	harness.journal.pending = true
+	review := harness.inspector.inspectReview
+
+	response := harness.request(t, http.MethodPut, "/api/v1/workspace", `{"workingDirectory":"/srv/lego","configurationPath":"/srv/lego/.lego.yml","reviewedEvidenceSha256":"`+review.ReviewedEvidenceSHA256+`"}`, true)
+
+	assertAPIError(t, response, http.StatusConflict, "recovery_required")
+	if strings.TrimSpace(response.Body.String()) != `{"error":{"code":"recovery_required","message":"Resolve the interrupted native configuration edit before changing the selected runtime or workspace."}}` {
+		t.Fatalf("recovery response = %s", response.Body.String())
+	}
+	if harness.journal.loads != 1 || len(harness.purposes) != 1 || harness.purposes[0] != workspace.PurposeInventory ||
+		harness.releases != 1 || harness.prepareCount != 0 || len(harness.inspector.requests) != 0 ||
+		len(harness.inventory.paths) != 0 || len(harness.selections.saves) != 0 {
+		t.Fatalf("recovery effects: loads=%d purposes=%v releases=%d prepares=%d inspections=%d inventory=%d saves=%d",
+			harness.journal.loads, harness.purposes, harness.releases, harness.prepareCount, len(harness.inspector.requests),
+			len(harness.inventory.paths), len(harness.selections.saves))
+	}
+}
+
 func TestWorkspaceBoundaryRejectsMissingAuthCSRFAndMalformedBodies(t *testing.T) {
 	harness := newWorkspaceHTTPHarness(t)
 	unauthenticated := newIdentityRequest(http.MethodGet, "/api/v1/workspace", "", nil, false)
@@ -596,13 +653,15 @@ func TestWorkspacePresentationPreservesPartialTraversalWithoutFabricatingFinalMe
 func TestNewRejectsIncompleteWorkspaceDependencies(t *testing.T) {
 	valid := testWorkspaceDependencies()
 	tests := []WorkspaceDependencies{
-		{Selections: valid.Selections, Inventory: valid.Inventory, PrepareRuntime: valid.PrepareRuntime},
-		{Inspector: valid.Inspector, Inventory: valid.Inventory, PrepareRuntime: valid.PrepareRuntime},
-		{Inspector: valid.Inspector, Selections: valid.Selections, PrepareRuntime: valid.PrepareRuntime},
-		{Inspector: valid.Inspector, Selections: valid.Selections, Inventory: valid.Inventory},
+		{Selections: valid.Selections, Inventory: valid.Inventory, PrepareRuntime: valid.PrepareRuntime, AcquireWorkspace: valid.AcquireWorkspace, EditJournal: valid.EditJournal},
+		{Inspector: valid.Inspector, Inventory: valid.Inventory, PrepareRuntime: valid.PrepareRuntime, AcquireWorkspace: valid.AcquireWorkspace, EditJournal: valid.EditJournal},
+		{Inspector: valid.Inspector, Selections: valid.Selections, PrepareRuntime: valid.PrepareRuntime, AcquireWorkspace: valid.AcquireWorkspace, EditJournal: valid.EditJournal},
+		{Inspector: valid.Inspector, Selections: valid.Selections, Inventory: valid.Inventory, AcquireWorkspace: valid.AcquireWorkspace, EditJournal: valid.EditJournal},
+		{Inspector: valid.Inspector, Selections: valid.Selections, Inventory: valid.Inventory, PrepareRuntime: valid.PrepareRuntime, EditJournal: valid.EditJournal},
+		{Inspector: valid.Inspector, Selections: valid.Selections, Inventory: valid.Inventory, PrepareRuntime: valid.PrepareRuntime, AcquireWorkspace: valid.AcquireWorkspace},
 	}
 	for _, dependencies := range tests {
-		if _, err := New(readinessStub{}, sharedTestIdentity(t), testRuntimeDependencies(), dependencies, fstest.MapFS{}, SecurityConfig{PublicOrigin: testPublicOrigin}); err == nil {
+		if _, err := New(readinessStub{}, sharedTestIdentity(t), testRuntimeDependencies(), dependencies, testConfigurationDependencies(), fstest.MapFS{}, SecurityConfig{PublicOrigin: testPublicOrigin}); err == nil {
 			t.Fatal("New() accepted incomplete workspace dependencies")
 		}
 	}

@@ -330,6 +330,40 @@ describe("runtime selection", () => {
     expect(client.inspectCandidate).not.toHaveBeenCalled();
   });
 
+  it("explains that pending native configuration recovery blocks runtime changes", async () => {
+    const client = clientWith({ state: "unselected" });
+    client.inspectCandidate = vi.fn(async () => {
+      throw new RuntimeRequestError("recovery_required", 409);
+    });
+    renderApp(client);
+
+    await inspectPath("/usr/local/bin/lego");
+
+    expect(await screen.findByText("Runtime unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Native configuration recovery is required. Reconcile the interrupted edit before inspecting or adopting an executable.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("explains that another native workspace action blocks runtime changes", async () => {
+    const client = clientWith({ state: "unselected" });
+    client.inspectCandidate = vi.fn(async () => {
+      throw new RuntimeRequestError("service_busy", 429);
+    });
+    renderApp(client);
+
+    await inspectPath("/usr/local/bin/lego");
+
+    expect(await screen.findByText("Runtime unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Another native workspace action is in progress. Check the runtime again after it finishes.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("invalidates stale supported readiness when a later runtime request fails", async () => {
     const client = clientWith({
       state: "supported",

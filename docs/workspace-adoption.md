@@ -53,9 +53,10 @@ complete adopted path set:
 - every referenced HTTP webroot.
 
 The review includes canonical path, object type, owner and group identifiers,
-mode, device, inode, access, and stable component identity. Each selected final
-object additionally includes link count, size, and modification metadata. Managed
-regular files cannot be hard linked. Native YAML and credential files are
+mode, device, inode, access, and stable component identity. Every selected
+final object binds its link count; selected regular files additionally bind
+size, modification time, and change time.
+Managed regular files cannot be hard linked. Native YAML and credential files are
 treated as confidential because they can contain EAB or provider secrets.
 Unsafe ownership, write access by an untrusted identity, special files,
 symbolic-link traversal, missing required objects, or insufficient service
@@ -63,10 +64,14 @@ access blocks adoption. Directory write access is required only where the
 native role needs it, including atomic configuration replacement, storage, and
 webroot challenge files.
 
-The administrator acknowledges a fingerprint of the complete displayed stable
-evidence. Volatile ancestor-directory link counts are audited internally but
-are not displayed, persisted, or fingerprinted; final selected-object link
-counts remain bound. AcmeMux reopens and reviews the paths before saving that selection.
+The administrator acknowledges a fingerprint of the complete stable evidence.
+Volatile ancestor-directory link counts are audited internally but are not
+displayed, persisted, or fingerprinted. Directory size, modification time, and
+change time can change merely because AcmeMux creates a same-directory staging
+file, so those fields are observations rather than persisted revision identity.
+Directory canonical path, device, inode, type, ownership, mode, access, and
+component placement remain bound; final regular-file link and time evidence
+also remains bound. AcmeMux reopens and reviews the paths before saving that selection.
 Every later workspace read repeats the audit. A material path, inode, owner,
 mode, link, or configuration-content change is reported instead of being
 hidden by the stored review.
@@ -113,11 +118,32 @@ directory is absent in both the pre-command and post-command audits. It returns
 an empty inventory without creating or repairing native paths. Every other
 command failure remains blocking.
 
+## Configuration editing and recovery
+
+Configuration mediation reuses the adopted path set and one shared workspace
+coordinator. It projects only logical fields declared by the exact runtime
+integration manifest; the authoritative YAML node tree and dotenv lines remain
+the write source. Preview is non-writing. Save rereads and fingerprints the
+reviewed sources, audits the candidate storage, dotenv, and webroot paths,
+stages mode-`0600` files beside their targets, and activates one file at a time
+only after immediate administrator reauthorization.
+
+One file rename is atomic, but a YAML-plus-dotenv edit is not atomic as a set.
+A secret-free SQLite journal makes every phase detectable without storing
+native bytes or credentials. A pending journal blocks another edit, runtime or
+workspace re-adoption, and later managed execution. AcmeMux never replays an
+interrupted candidate. Wholly
+unapplied and wholly applied states have explicit discard or finalize actions;
+partial or ambiguous state requires host repair followed by confirmed,
+freshly validated adoption of the current files. See
+`native-configuration.md` before handling an interrupted edit.
+
 ## Application-owned state
 
 SQLite may contain the selected working-directory and configuration request,
 resolved native path references, bounded filesystem observations, review
-fingerprint, and review time. It does not contain YAML or dotenv contents,
+fingerprint, review time, and one secret-free edit journal containing target
+paths and inode placement metadata. It does not contain YAML or dotenv contents,
 certificate or chain bytes, private keys, ACME account material, archives, or
 an application-owned certificate inventory.
 

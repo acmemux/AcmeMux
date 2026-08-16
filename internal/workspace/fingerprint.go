@@ -8,19 +8,27 @@ import (
 	"time"
 )
 
-const reviewFingerprintDomain = "acmemux-workspace-review-v1"
+const reviewFingerprintDomain = "acmemux-workspace-review-v2"
 
 // ReviewFingerprint returns a stable digest of all administrator-visible
 // evidence except observation time and the digest field itself.
 func ReviewFingerprint(review Review) string {
+	return reviewFingerprint(review, reviewFingerprintDomain, writePathFingerprint)
+}
+
+func legacyReviewFingerprintV1(review Review) string {
+	return reviewFingerprint(review, "acmemux-workspace-review-v1", writePathFingerprintV1)
+}
+
+func reviewFingerprint(review Review, domain string, writePath func(fingerprintWriter, PathEvidence)) string {
 	digest := sha256.New()
-	writeFingerprintValue(digest, reviewFingerprintDomain)
+	writeFingerprintValue(digest, domain)
 	writeFingerprintValue(digest, string(review.ConfigurationSource))
 	writeFingerprintValue(digest, strconv.FormatBool(review.Adoptable))
 	paths := review.AllPaths()
 	writeFingerprintValue(digest, strconv.Itoa(len(paths)))
 	for _, evidence := range paths {
-		writePathFingerprint(digest, evidence)
+		writePath(digest, evidence)
 	}
 	writeFingerprintValue(digest, strconv.Itoa(len(review.Diagnostics)))
 	for _, diagnostic := range review.Diagnostics {
@@ -34,7 +42,29 @@ func ReviewFingerprint(review Review) string {
 	return hex.EncodeToString(digest.Sum(nil))
 }
 
+func writePathFingerprintV1(digest fingerprintWriter, evidence PathEvidence) {
+	writePathFingerprintPrefix(digest, evidence)
+	writeFingerprintValue(digest, strconv.FormatInt(evidence.Size, 10))
+	writeFingerprintValue(digest, fingerprintTime(evidence.ModifiedAt))
+	writeFingerprintValue(digest, fingerprintTime(evidence.ChangedAt))
+	writePathFingerprintSuffix(digest, evidence)
+}
+
 func writePathFingerprint(digest fingerprintWriter, evidence PathEvidence) {
+	writePathFingerprintPrefix(digest, evidence)
+	if evidence.Type == PathTypeDirectory {
+		writeFingerprintValue(digest, "0")
+		writeFingerprintValue(digest, "")
+		writeFingerprintValue(digest, "")
+	} else {
+		writeFingerprintValue(digest, strconv.FormatInt(evidence.Size, 10))
+		writeFingerprintValue(digest, fingerprintTime(evidence.ModifiedAt))
+		writeFingerprintValue(digest, fingerprintTime(evidence.ChangedAt))
+	}
+	writePathFingerprintSuffix(digest, evidence)
+}
+
+func writePathFingerprintPrefix(digest fingerprintWriter, evidence PathEvidence) {
 	writeFingerprintValue(digest, string(evidence.Role))
 	writeFingerprintValue(digest, evidence.Reference)
 	writeFingerprintValue(digest, evidence.Path)
@@ -46,9 +76,9 @@ func writePathFingerprint(digest fingerprintWriter, evidence PathEvidence) {
 	writeFingerprintValue(digest, strconv.FormatUint(uint64(evidence.UID), 10))
 	writeFingerprintValue(digest, strconv.FormatUint(uint64(evidence.GID), 10))
 	writeFingerprintValue(digest, strconv.FormatUint(evidence.NLink, 10))
-	writeFingerprintValue(digest, strconv.FormatInt(evidence.Size, 10))
-	writeFingerprintValue(digest, fingerprintTime(evidence.ModifiedAt))
-	writeFingerprintValue(digest, fingerprintTime(evidence.ChangedAt))
+}
+
+func writePathFingerprintSuffix(digest fingerprintWriter, evidence PathEvidence) {
 	writeAccessFingerprint(digest, evidence.Access)
 	writeFingerprintValue(digest, strconv.FormatBool(evidence.Safe))
 	writeFingerprintValue(digest, strconv.Itoa(len(evidence.Components)))

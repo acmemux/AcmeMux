@@ -202,6 +202,7 @@ export type WorkspaceErrorCode =
   | "request_not_allowed"
   | "invalid_request"
   | "workspace_changed"
+  | "recovery_required"
   | "service_busy"
   | "service_unavailable"
   | "invalid_response"
@@ -417,6 +418,7 @@ const knownErrorCodes = new Set<WorkspaceErrorCode>([
   "request_not_allowed",
   "invalid_request",
   "workspace_changed",
+  "recovery_required",
   "service_busy",
   "service_unavailable",
 ]);
@@ -438,6 +440,8 @@ function workspaceErrorMessage(code: WorkspaceErrorCode): string {
       return "The workspace request was invalid.";
     case "workspace_changed":
       return "The workspace changed after review.";
+    case "recovery_required":
+      return "Native configuration recovery must be resolved before changing the workspace.";
     case "service_busy":
       return "Another bounded workspace inspection is already running.";
     case "service_unavailable":

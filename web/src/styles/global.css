@@ -4,6 +4,7 @@
 @import "./auth.css";
 @import "./runtime.css";
 @import "./workspace.css";
+@import "./configuration.css";
 
 *,
 *::before,

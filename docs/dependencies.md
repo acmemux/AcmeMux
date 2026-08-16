@@ -10,7 +10,9 @@ The foundation uses a deliberately small production dependency set.
 | golang.org/x/crypto | 0.55.0 | Argon2id password verification | BSD-3-Clause; current Go cryptography subrepository release maintained by the Go project |
 | golang.org/x/sys | 0.47.0 | Linux file-capability inspection at the executable trust boundary | BSD-3-Clause; current Go system-interface subrepository release maintained by the Go project |
 | golang.org/x/term | 0.45.0 | No-echo local administrator password input | BSD-3-Clause; current Go terminal subrepository release maintained by the Go project |
-| go.yaml.in/yaml/v3 | 3.0.5 | Bounded native YAML path discovery for workspace adoption | MIT / Apache-2.0; current canonical go-yaml v3 release with active maintenance |
+| go.yaml.in/yaml/v3 | 3.0.5 | Bounded native YAML path discovery plus authoritative node-tree projection and editing | MIT / Apache-2.0; current canonical go-yaml v3 release with active maintenance |
+| github.com/joho/godotenv | 1.5.1 | Upstream-compatible parsing inside the bounded, line-preserving exact-key dotenv editor | MIT; stable feature-complete library whose upstream scope accepts compatibility and bug fixes |
+| github.com/santhosh-tekuri/jsonschema/v6 | 6.0.3 | Offline compilation and validation of the exact bundled upstream Draft 7 schema | Apache-2.0; exact v6 release from a standards-conformance project with Draft 7 test-suite coverage |
 | React / React DOM | 19.2.8 | Browser component runtime | MIT; current npm releases |
 | React Aria Components | 1.20.0 | Headless accessible component behavior | Apache-2.0; current Adobe React Spectrum release with React 19 support |
 
@@ -45,3 +47,10 @@ The compatibility package embeds upstream `lego`'s v5.3.1 JSON Schema and full
 MIT license notice as reviewed data assets. AcmeMux does not link or embed the
 `lego` library or executable. Asset provenance and deliberate update checks are
 documented in `runtime-compatibility.md`.
+
+`godotenv` is not used to load arbitrary process environment into AcmeMux. The
+application first applies its own UTF-8, size, line, duplicate-key,
+manifest-key, and expansion checks, then invokes the parser only for one
+bounded managed statement at a time. `jsonschema/v6` is configured for Draft 7
+and a rejecting resource loader; schema validation performs no network or
+filesystem resolution.
