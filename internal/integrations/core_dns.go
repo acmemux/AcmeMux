@@ -74,10 +74,16 @@ var providerFieldCodes = map[FieldID]string{
 	FieldDuckDNSSequenceInterval: "duckdns",
 }
 
-func SupportedCoreDNSProviders() []string { return []string{"cloudflare", "digitalocean", "duckdns"} }
+func SupportedCoreDNSProviders() []string {
+	return []string{"cloudflare", "digitalocean", "duckdns"}
+}
+
+func SupportedDNSProviders() []string {
+	return []string{"azuredns", "cloudflare", "digitalocean", "duckdns", "route53"}
+}
 
 func SupportsCoreDNSProvider(code string) bool {
-	for _, supported := range SupportedCoreDNSProviders() {
+	for _, supported := range SupportedDNSProviders() {
 		if code == supported {
 			return true
 		}
@@ -93,6 +99,10 @@ func ProviderCodeForField(id FieldID) (string, bool) {
 }
 
 func buildCoreDNSManifest() Manifest {
+	return buildCoreDNSManifestForProviders(SupportedCoreDNSProviders())
+}
+
+func buildCoreDNSManifestForProviders(providers []string) Manifest {
 	core := buildCoreManifest()
 	dns := []SelectorSegment{YAMLKey("challenges"), YAMLBinding(BindingChallenge), YAMLKey("dns")}
 	envFile := appendSelector(dns, "envFile")
@@ -100,7 +110,6 @@ func buildCoreDNSManifest() Manifest {
 	defaultZero := IntegerValue(0)
 	defaultFalse := BooleanValue(false)
 	defaultDuration := StringValue("0s")
-	providers := SupportedCoreDNSProviders()
 	fields := []FieldSpec{
 		mustField(FieldDefinition{ID: FieldChallengeDNSProvider, Label: "DNS provider", Kind: FieldString, Target: TargetYAML,
 			Sensitivity: SensitivityPublic, Disposition: DispositionManaged, Selector: appendSelector(dns, "provider"),
@@ -197,7 +206,7 @@ func ValidateCoreDNSDotenvValue(id FieldID, value []byte) error {
 		FieldDuckDNSPropagationTimeout, FieldDuckDNSPollingInterval, FieldDuckDNSHTTPTimeout, FieldDuckDNSSequenceInterval:
 		return validateDecimalRange(text, 1, 3600)
 	}
-	return nil
+	return ValidateCloudDNSDotenvValue(id, value)
 }
 
 func validateDecimalRange(value string, minimum, maximum int64) error {
@@ -243,6 +252,11 @@ func CoreDNSCredentialIssues(provider string, present map[FieldID]bool) []FieldI
 		}
 		return []FieldID{FieldDuckDNSToken}
 	default:
+		// Cloud provider modes are value-aware and are validated by
+		// CloudDNSCredentialIssues after dotenv projection.
+		if provider == "azuredns" || provider == "route53" {
+			return nil
+		}
 		return []FieldID{FieldChallengeDNSProvider}
 	}
 }

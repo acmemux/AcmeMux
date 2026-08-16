@@ -7,6 +7,7 @@ import { WriteOnlySecretField } from "../components/WriteOnlySecretField";
 import {
   acknowledgeUnsupportedField,
   caOptions,
+  cloudSecretFieldIds,
   keyTypeOptions,
   managedFieldIds,
   newDNSChallenge,
@@ -778,9 +779,11 @@ export function ChallengesEditor({
 }
 
 const dnsProviderOptions = [
+  { value: "azuredns", label: "Azure DNS" },
   { value: "cloudflare", label: "Cloudflare" },
   { value: "digitalocean", label: "DigitalOcean" },
   { value: "duckdns", label: "DuckDNS" },
+  { value: "route53", label: "Amazon Route 53" },
 ] as const;
 
 const providerSettings = {
@@ -824,7 +827,224 @@ const providerSettings = {
       "60",
     ],
   ],
+  azuredns: [],
+  route53: [],
 } as const;
+
+const cloudAuthOptions = {
+  azuredns: [
+    ["azure_client_secret", "Service principal client secret"],
+    ["azure_client_certificate", "Service principal certificate"],
+    ["azure_workload", "Workload identity"],
+    ["azure_managed", "Managed identity"],
+    ["azure_cli", "Azure CLI cache"],
+    ["azure_oidc_inline", "OIDC inline assertion"],
+    ["azure_oidc_file", "OIDC assertion file"],
+    ["azure_oidc_request", "OIDC assertion endpoint"],
+    ["azure_pipeline", "Azure Pipelines identity"],
+  ],
+  route53: [
+    ["aws_static", "Static or temporary credentials"],
+    ["aws_shared_profile", "Audited shared profile"],
+    ["aws_instance_role", "EC2 instance role"],
+  ],
+} as const;
+
+const cloudCommonFields = {
+  azuredns: [
+    [managedFieldIds.azureEnvironment, "Azure cloud", "public"],
+    [
+      managedFieldIds.azureSubscriptionId,
+      "Subscription ID",
+      "00000000-0000-0000-0000-000000000000",
+    ],
+    [managedFieldIds.azureResourceGroup, "Resource group", "dns-production"],
+    [managedFieldIds.azureZoneName, "Zone override", "example.com"],
+    [managedFieldIds.azurePrivateZone, "Private zone", "false"],
+  ],
+  route53: [
+    [managedFieldIds.awsRegion, "AWS region", "us-east-1"],
+    [
+      managedFieldIds.awsHostedZoneId,
+      "Hosted zone override",
+      "Z11111112222222333333",
+    ],
+    [managedFieldIds.awsPrivateZone, "Private zone", "false"],
+    [
+      managedFieldIds.awsAssumeRoleArn,
+      "Assume-role ARN",
+      "arn:aws:iam::123456789012:role/acmemux-dns",
+    ],
+  ],
+} as const;
+
+const cloudModeFields: Record<
+  string,
+  readonly (readonly [string, string, string])[]
+> = {
+  azure_client_secret: [
+    [
+      managedFieldIds.azureTenantId,
+      "Tenant ID",
+      "00000000-0000-0000-0000-000000000000",
+    ],
+    [
+      managedFieldIds.azureClientId,
+      "Client ID",
+      "00000000-0000-0000-0000-000000000000",
+    ],
+  ],
+  azure_client_certificate: [
+    [managedFieldIds.azureTenantId, "Tenant ID", ""],
+    [managedFieldIds.azureClientId, "Client ID", ""],
+    [
+      managedFieldIds.azureClientCertificatePath,
+      "Certificate path",
+      "/etc/acmemux/azure-client.pem",
+    ],
+  ],
+  azure_workload: [
+    [managedFieldIds.azureTenantId, "Tenant ID", ""],
+    [managedFieldIds.azureClientId, "Client ID", ""],
+    [
+      managedFieldIds.azureFederatedTokenFile,
+      "Federated token file",
+      "/var/run/secrets/azure/tokens/azure-identity-token",
+    ],
+  ],
+  azure_managed: [
+    [managedFieldIds.azureClientId, "Optional user-assigned client ID", ""],
+    [managedFieldIds.azureMsiTimeout, "Metadata timeout seconds", "2"],
+    [
+      managedFieldIds.azureImdsEndpoint,
+      "Optional Azure Arc IMDS endpoint",
+      "http://127.0.0.1:40342",
+    ],
+    [
+      managedFieldIds.azureIdentityEndpoint,
+      "Optional Azure Arc identity endpoint",
+      "http://127.0.0.1:40342/metadata/identity/oauth2/token",
+    ],
+  ],
+  azure_cli: [
+    [managedFieldIds.azureTenantId, "Optional tenant ID", ""],
+    [
+      managedFieldIds.azureCliPath,
+      "Directory containing trusted az",
+      "/usr/bin",
+    ],
+    [
+      managedFieldIds.azureCliConfigDirectory,
+      "Azure CLI cache directory",
+      "/var/lib/acmemux/azure",
+    ],
+  ],
+  azure_oidc_inline: [
+    [managedFieldIds.azureTenantId, "Tenant ID", ""],
+    [managedFieldIds.azureClientId, "Client ID", ""],
+  ],
+  azure_oidc_file: [
+    [managedFieldIds.azureTenantId, "Tenant ID", ""],
+    [managedFieldIds.azureClientId, "Client ID", ""],
+    [
+      managedFieldIds.azureOidcTokenFile,
+      "OIDC assertion file",
+      "/var/run/secrets/azure/oidc-token",
+    ],
+  ],
+  azure_oidc_request: [
+    [managedFieldIds.azureTenantId, "Tenant ID", ""],
+    [managedFieldIds.azureClientId, "Client ID", ""],
+    [
+      managedFieldIds.azureOidcRequestUrl,
+      "OIDC assertion endpoint",
+      "https://issuer.example/token",
+    ],
+  ],
+  azure_pipeline: [
+    [managedFieldIds.azureTenantId, "Tenant ID", ""],
+    [managedFieldIds.azureClientId, "Client ID", ""],
+    [managedFieldIds.azureServiceConnectionId, "Service connection ID", ""],
+    [
+      managedFieldIds.azureSystemOidcRequestUri,
+      "Pipeline OIDC endpoint",
+      "https://dev.azure.com/example/_apis/distributedtask/hubs/build/plans/token",
+    ],
+  ],
+  aws_static: [],
+  aws_shared_profile: [
+    [managedFieldIds.awsProfile, "Profile name", "acmemux"],
+    [
+      managedFieldIds.awsSharedCredentialsFile,
+      "Shared credentials file",
+      "/etc/acmemux/aws-credentials",
+    ],
+  ],
+  aws_instance_role: [],
+};
+
+const cloudModeSecretLabels: Record<
+  string,
+  readonly (readonly [string, string])[]
+> = {
+  azure_client_secret: [[managedFieldIds.azureClientSecret, "Client secret"]],
+  azure_client_certificate: [
+    [
+      managedFieldIds.azureClientCertificatePassword,
+      "Certificate password (optional)",
+    ],
+  ],
+  azure_oidc_inline: [[managedFieldIds.azureOidcToken, "OIDC assertion"]],
+  azure_oidc_request: [
+    [managedFieldIds.azureOidcRequestToken, "OIDC request token"],
+  ],
+  azure_pipeline: [
+    [managedFieldIds.azureSystemAccessToken, "Pipeline system access token"],
+  ],
+  aws_static: [
+    [managedFieldIds.awsAccessKeyId, "Access key ID"],
+    [managedFieldIds.awsSecretAccessKey, "Secret access key"],
+    [managedFieldIds.awsSessionToken, "Session token (optional)"],
+    [managedFieldIds.awsExternalId, "Assume-role external ID (optional)"],
+  ],
+  aws_shared_profile: [
+    [managedFieldIds.awsExternalId, "Assume-role external ID (optional)"],
+  ],
+  aws_instance_role: [
+    [managedFieldIds.awsExternalId, "Assume-role external ID (optional)"],
+  ],
+};
+
+function cloudModeDefaults(
+  mode: NativeConfigurationDraft["challenges"][number]["cloudAuthMode"],
+  current: Record<string, string>,
+) {
+  const next = { ...current };
+  const azure = mode.startsWith("azure_");
+  next[managedFieldIds.azureAuthMethod] =
+    mode === "azure_workload"
+      ? "wli"
+      : mode === "azure_managed"
+        ? "msi"
+        : mode === "azure_cli"
+          ? "cli"
+          : mode.startsWith("azure_oidc")
+            ? "oidc"
+            : mode === "azure_pipeline"
+              ? "pipeline"
+              : "env";
+  if (azure) {
+    next[managedFieldIds.azureEnvironment] ||= "public";
+    next[managedFieldIds.azurePrivateZone] ||= "false";
+  } else {
+    next[managedFieldIds.awsSdkLoadConfig] = "false";
+    next[managedFieldIds.awsEc2MetadataDisabled] =
+      mode === "aws_instance_role" ? "false" : "true";
+    next[managedFieldIds.awsPrivateZone] ||= "false";
+    next[managedFieldIds.awsWaitForChanges] ||= "true";
+  }
+  return next;
+}
 
 function DNSChallengeEditor({
   challenge,
@@ -919,6 +1139,25 @@ function DNSChallengeEditor({
                 provider,
                 originalProvider: provider,
                 envFile: `.${provider}.env`,
+                cloudAuthMode:
+                  provider === "route53" ? "aws_static" : "azure_client_secret",
+                originalCloudAuthMode:
+                  provider === "route53" ? "aws_static" : "azure_client_secret",
+                providerSettings:
+                  provider === "azuredns"
+                    ? cloudModeDefaults("azure_client_secret", {})
+                    : provider === "route53"
+                      ? cloudModeDefaults("aws_static", {})
+                      : {},
+                cloudSecrets: Object.fromEntries(
+                  cloudSecretFieldIds.map((fieldId) => [
+                    fieldId,
+                    { action: "keep" },
+                  ]),
+                ),
+                cloudSecretPresence: Object.fromEntries(
+                  cloudSecretFieldIds.map((fieldId) => [fieldId, false]),
+                ),
               });
             }}
             value={challenge.provider}
@@ -1141,7 +1380,7 @@ function DNSChallengeEditor({
           "digitalOceanTokenPresent",
           "Write-only token with permission to manage domain records.",
         )
-      ) : (
+      ) : challenge.provider === "duckdns" ? (
         secret(
           "duckdns-token",
           "DuckDNS account token",
@@ -1149,6 +1388,114 @@ function DNSChallengeEditor({
           "duckDnsTokenPresent",
           "Write-only DuckDNS account token.",
         )
+      ) : (
+        <>
+          <FeedbackPanel
+            tone={
+              challenge.cloudAuthMode === "azure_managed" ||
+              challenge.cloudAuthMode === "aws_instance_role"
+                ? "warning"
+                : "info"
+            }
+            title="Explicit cloud identity boundary"
+          >
+            <p>
+              AcmeMux passes no inherited service environment or HOME. Only the
+              selected fields, audited files, trusted helper, or explicitly
+              acknowledged metadata identity are available to upstream lego.
+            </p>
+          </FeedbackPanel>
+          <ConfigurationField
+            description="Authentication alternatives are mutually exclusive; switching modes removes obsolete native variables atomically."
+            id={`${prefix}-cloud-auth-mode`}
+            label="Authentication mode"
+          >
+            <select
+              disabled={disabled}
+              id={`${prefix}-cloud-auth-mode`}
+              onChange={(event) => {
+                const cloudAuthMode = event.currentTarget
+                  .value as typeof challenge.cloudAuthMode;
+                updateChallenge(index, {
+                  cloudAuthMode,
+                  providerSettings: cloudModeDefaults(
+                    cloudAuthMode,
+                    challenge.providerSettings,
+                  ),
+                });
+              }}
+              value={challenge.cloudAuthMode}
+            >
+              {cloudAuthOptions[challenge.provider].map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </ConfigurationField>
+          <div className="am-configuration-editor__grid">
+            {[
+              ...cloudCommonFields[challenge.provider],
+              ...(cloudModeFields[challenge.cloudAuthMode] ?? []),
+            ].map(([fieldId, label, placeholder]) => {
+              const id = `${prefix}-${fieldId.replaceAll(".", "-")}`;
+              return (
+                <ConfigurationField
+                  description="Exact upstream cloud setting stored in the restrictive native dotenv file."
+                  error={issueFor(issues, id)}
+                  id={id}
+                  key={fieldId}
+                  label={label}
+                >
+                  <input
+                    disabled={disabled}
+                    id={id}
+                    maxLength={4095}
+                    onChange={(event) =>
+                      updateChallenge(index, {
+                        providerSettings: {
+                          ...challenge.providerSettings,
+                          [fieldId]: event.currentTarget.value,
+                        },
+                      })
+                    }
+                    placeholder={placeholder}
+                    spellCheck={false}
+                    value={challenge.providerSettings[fieldId] ?? ""}
+                  />
+                </ConfigurationField>
+              );
+            })}
+          </div>
+          {(cloudModeSecretLabels[challenge.cloudAuthMode] ?? []).map(
+            ([fieldId, label]) => (
+              <WriteOnlySecretField
+                description="Write-only cloud credential retained only in the selected native dotenv file or operation memory."
+                draft={challenge.cloudSecrets[fieldId] ?? { action: "keep" }}
+                error={issueFor(
+                  issues,
+                  `${prefix}-${fieldId.replaceAll(".", "-")}-replacement`,
+                )}
+                id={`${prefix}-${fieldId.replaceAll(".", "-")}`}
+                isDisabled={disabled}
+                key={fieldId}
+                label={label}
+                maxLength={65536}
+                onChange={(value) =>
+                  updateChallenge(index, {
+                    cloudSecrets: {
+                      ...challenge.cloudSecrets,
+                      [fieldId]: value,
+                    },
+                  })
+                }
+                presence={
+                  challenge.cloudSecretPresence[fieldId] ? "present" : "absent"
+                }
+              />
+            ),
+          )}
+        </>
       )}
       <h5>Provider overrides</h5>
       <div className="am-configuration-editor__grid">

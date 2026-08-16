@@ -252,6 +252,17 @@ workspace, source, certificate, and policy evidence. Enqueue reconstructs that
 evidence, compares the token in constant time, and revalidates the original
 session and CSRF pair immediately before committing work to SQLite.
 
+For Azure DNS and Route 53, the preview also names the selected authentication
+mode and every non-secret file, helper, or metadata consequence. The broker
+inherits no service environment and supplies no default `HOME`. Credential
+files use the workspace no-follow ownership, permission, hard-link, size, and
+concurrent-change policy. Azure CLI is limited to one audited `az` helper and
+explicit cache. Azure managed identity and AWS instance role are the only modes
+that enable their metadata path. AWS shared profiles reject helpers, SSO,
+config loading, and role recursion and are materialized as sensitive
+operation-scoped variables. Sensitive values join the bounded redaction set
+and are cleared with the execution plan.
+
 The durable worker, not the request context, owns accepted process lifetime.
 Browser disconnect, logout, or session expiry after the commit cannot signal
 the child. There is no browser cancellation mutation and no automatic retry.

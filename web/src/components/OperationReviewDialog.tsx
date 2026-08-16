@@ -133,6 +133,36 @@ export function OperationReviewDialog({
                 </ul>
               </section>
 
+              {(intent.cloudAccess ?? []).length > 0 ? (
+                <section
+                  className="am-operation-review__effects"
+                  aria-labelledby="operation-review-cloud-access"
+                >
+                  <h3 id="operation-review-cloud-access">
+                    Cloud identity access
+                  </h3>
+                  <ul>
+                    {(intent.cloudAccess ?? []).map((access) => (
+                      <li key={access.challengeName}>
+                        <strong>
+                          {access.provider} / {access.authMode}
+                        </strong>{" "}
+                        for <code>{access.challengeName}</code>
+                        {access.files.length > 0
+                          ? `; audited files: ${access.files.join(", ")}`
+                          : ""}
+                        {access.helper
+                          ? `; trusted helper: ${access.helper}`
+                          : ""}
+                        {access.metadata
+                          ? `; ambient access: ${access.metadata}`
+                          : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
               <section
                 className="am-operation-review__effects"
                 aria-labelledby="operation-review-effects"

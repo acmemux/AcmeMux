@@ -358,10 +358,13 @@ func (e *Engine) Preview(source []byte, changes []Change) (*Candidate, error) {
 }
 
 func (e *Engine) usesCoreSemantics() bool {
-	return e.manifest.ID() == integrations.CoreManifestID || e.manifest.ID() == integrations.CoreDNSManifestID
+	return e.manifest.ID() == integrations.CoreManifestID || e.manifest.ID() == integrations.CoreDNSManifestID ||
+		e.manifest.ID() == integrations.CloudDNSManifestID
 }
 
-func (e *Engine) supportsCoreDNS() bool { return e.manifest.ID() == integrations.CoreDNSManifestID }
+func (e *Engine) supportsCoreDNS() bool {
+	return e.manifest.ID() == integrations.CoreDNSManifestID || e.manifest.ID() == integrations.CloudDNSManifestID
+}
 
 func coreEABReplacements(changes []preparedChange) map[string]bool {
 	const (

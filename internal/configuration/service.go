@@ -172,6 +172,12 @@ type Transactions interface {
 
 type EngineFactory func(compatibility.ManifestID) (*nativeconfig.Engine, integrations.Manifest, error)
 
+type CloudAccessInspector interface {
+	ReadExternalCredential(context.Context, string, int64) (workspace.ExternalFile, error)
+	AuditExternalDirectory(context.Context, string) (workspace.PathEvidence, error)
+	AuditExternalExecutable(context.Context, string) (workspace.PathEvidence, error)
+}
+
 type Dependencies struct {
 	RuntimeSelections RuntimeSelections
 	RuntimeInspector  RuntimeInspector
@@ -179,6 +185,7 @@ type Dependencies struct {
 	Coordinator       LeaseCoordinator
 	Transactions      Transactions
 	EngineFactory     EngineFactory
+	CloudAccess       CloudAccessInspector
 	Random            io.Reader
 }
 
@@ -189,6 +196,7 @@ type Service struct {
 	coordinator       LeaseCoordinator
 	transactions      Transactions
 	engineFactory     EngineFactory
+	cloudAccess       CloudAccessInspector
 	tokenKey          []byte
 }
 
@@ -214,12 +222,13 @@ func New(dependencies Dependencies) (*Service, error) {
 		coordinator:       dependencies.Coordinator,
 		transactions:      dependencies.Transactions,
 		engineFactory:     dependencies.EngineFactory,
+		cloudAccess:       dependencies.CloudAccess,
 		tokenKey:          key,
 	}, nil
 }
 
 func productionEngine(runtimeID compatibility.ManifestID) (*nativeconfig.Engine, integrations.Manifest, error) {
-	manifest, ok := integrations.CoreDNSManifest(runtimeID)
+	manifest, ok := integrations.CloudDNSManifest(runtimeID)
 	if !ok {
 		return nil, integrations.Manifest{}, fmt.Errorf("%w: runtime integration manifest", ErrUnavailable)
 	}

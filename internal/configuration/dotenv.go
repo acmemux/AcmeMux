@@ -75,6 +75,18 @@ func loadDotenvDocuments(inspection nativeconfig.Inspection, sources *workspace.
 		sourceByPath[source.Path] = source
 	}
 	for path, managed := range result.byPath {
+		providers := make(map[string]struct{})
+		for _, route := range managed.routes {
+			if provider, ok := integrations.ProviderCodeForField(route.FieldID()); ok {
+				providers[provider] = struct{}{}
+			}
+		}
+		if len(providers) > 1 {
+			result.unsupported = true
+			result.diagnostics = appendBoundedDiagnostic(result.diagnostics, Diagnostic{
+				Code: CodeSemanticValidationFailed, Severity: SeverityBlocking, Role: RoleDotenv, Path: path,
+			})
+		}
 		sort.Strings(managed.allowed)
 		managed.allowed = slices.Compact(managed.allowed)
 		source, present := sourceByPath[path]

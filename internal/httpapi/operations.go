@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -99,6 +100,16 @@ type operationIntent struct {
 	Runtime           operationRuntime       `json:"runtime"`
 	Certificates      []operationCertificate `json:"certificates"`
 	NativeEffects     []string               `json:"nativeEffects"`
+	CloudAccess       []operationCloudAccess `json:"cloudAccess"`
+}
+
+type operationCloudAccess struct {
+	ChallengeName string   `json:"challengeName"`
+	Provider      string   `json:"provider"`
+	AuthMode      string   `json:"authMode"`
+	Files         []string `json:"files"`
+	Helper        *string  `json:"helper"`
+	Metadata      *string  `json:"metadata"`
 }
 
 type operationRuntime struct {
@@ -415,13 +426,43 @@ func presentOperationPreview(preview operation.Preview) (operationPreview, bool)
 			},
 		})
 	}
+	cloudAccess := make([]operationCloudAccess, 0, len(preview.Intent.CloudAccess))
+	for _, access := range preview.Intent.CloudAccess {
+		if !operationIdentifierPattern.MatchString(access.ChallengeName) || (access.Provider != "azuredns" && access.Provider != "route53") ||
+			!validOperationText(access.AuthMode, 64, false) || len(access.Files) > 8 {
+			return operationPreview{}, false
+		}
+		files := make([]string, len(access.Files))
+		for index, path := range access.Files {
+			if !validWorkspacePath(path) {
+				return operationPreview{}, false
+			}
+			files[index] = path
+		}
+		var helper, metadata *string
+		if access.Helper != "" {
+			if !validWorkspacePath(access.Helper) {
+				return operationPreview{}, false
+			}
+			value := access.Helper
+			helper = &value
+		}
+		if access.Metadata != "" {
+			if !validOperationText(access.Metadata, 128, false) {
+				return operationPreview{}, false
+			}
+			value := access.Metadata
+			metadata = &value
+		}
+		cloudAccess = append(cloudAccess, operationCloudAccess{ChallengeName: access.ChallengeName, Provider: access.Provider, AuthMode: access.AuthMode, Files: files, Helper: helper, Metadata: metadata})
+	}
 	return operationPreview{
 		State: "review_required", ReviewedPreviewToken: preview.ReviewedPreviewToken,
 		Intent: operationIntent{
 			Kind: "manual_workspace_run", WorkingDirectory: preview.Intent.WorkingDirectory,
 			ConfigurationPath: preview.Intent.ConfigurationPath, StoragePath: preview.Intent.StoragePath,
 			Runtime:      operationRuntime{Identity: preview.Intent.RuntimeIdentity, ManifestID: string(preview.Intent.RuntimeManifestID)},
-			Certificates: certificates,
+			Certificates: certificates, CloudAccess: cloudAccess,
 			NativeEffects: []string{
 				"acme_accounts_may_change", "certificate_artifacts_may_change",
 				"native_configuration_backup_may_change", "external_acme_state_may_change",
@@ -435,7 +476,7 @@ func validOperationChallenge(kind, mode string) bool {
 	if kind == "http-01" {
 		return mode == "listener" || mode == "webroot"
 	}
-	return kind == "dns-01" && integrations.SupportsCoreDNSProvider(mode)
+	return kind == "dns-01" && slices.Contains(integrations.SupportedDNSProviders(), mode)
 }
 
 func presentOperationPolicy(policy operation.Policy) (operationPolicy, bool) {

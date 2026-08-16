@@ -7,7 +7,7 @@ GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
 export GOMODCACHE := $(CURDIR)/.cache/go-mod
 
-.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-core test-provider-core-smoke test-race test-redaction test-runtime test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-runtime test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -80,6 +80,7 @@ test-lego-integration:
 	@test -n "$$ACMEMUX_TEST_LEGO_SOURCE" || (echo "ACMEMUX_TEST_LEGO_SOURCE must name the upstream lego source snapshot" && exit 1)
 	ACMEMUX_TEST_LEGO_INTEGRATION=1 go test -count=1 -timeout=5m -run '^TestSourceBuiltLegoFileMode$$' ./internal/broker/...
 	ACMEMUX_TEST_LEGO_INTEGRATION=1 go test -count=1 -timeout=5m -run '^TestCoreDNSUpstreamProviderFixtures$$' ./internal/integrations/...
+	ACMEMUX_TEST_LEGO_INTEGRATION=1 go test -count=1 -timeout=5m -run '^TestCloudDNSUpstreamProviderFixtures$$' ./internal/integrations/...
 
 test-integrations:
 	go test ./internal/integrations/...
@@ -88,9 +89,15 @@ test-provider-core:
 	go test ./internal/integrations/... ./internal/nativeconfig/... ./internal/configuration/... ./internal/httpapi/...
 	cd web && npm run test -- src/app/nativeConfigurationModel.test.ts src/app/NativeConfigurationFields.test.tsx
 
+test-provider-cloud:
+	go test ./internal/integrations/... ./internal/nativeconfig/... ./internal/configuration/... ./internal/workspace/... ./internal/broker/... ./internal/operation/... ./internal/httpapi/...
+	cd web && npm run test -- src/api/operations.test.ts src/app/nativeConfigurationModel.test.ts src/app/NativeConfigurationFields.test.tsx src/app/OperationsPanel.test.tsx
+
 test-provider-core-smoke:
 	@test "$$ACMEMUX_PROVIDER_SMOKE" = "1" || (echo "ACMEMUX_PROVIDER_SMOKE=1 is required for credentialed provider smoke" && exit 1)
-	go test -count=1 -run '^TestCredentialedCoreDNSProviderSmoke$$' ./internal/integrations/...
+	go test -count=1 -run '^TestCredentialedDNSProviderSmoke$$' ./internal/integrations/...
+
+test-provider-cloud-smoke: test-provider-core-smoke
 
 test-nativeconfig:
 	go test ./internal/integrations/... ./internal/nativeconfig/... ./internal/configuration/...

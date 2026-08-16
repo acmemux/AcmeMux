@@ -40,6 +40,7 @@ export const manualOperationPreview = {
         },
       },
     ],
+    cloudAccess: [],
     nativeEffects: [
       "acme_accounts_may_change",
       "certificate_artifacts_may_change",

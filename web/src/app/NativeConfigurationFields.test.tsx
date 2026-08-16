@@ -68,4 +68,42 @@ describe("DNS provider configuration forms", () => {
       ).getByLabelText("New secret value"),
     ).toHaveAttribute("type", "password");
   });
+
+  it("shows every Azure identity mode and ambient-access warning", () => {
+    const draft = initialConfigurationDraft([], true);
+    const challenge = newDNSChallenge("dns-azure");
+    challenge.provider = "azuredns";
+    challenge.cloudAuthMode = "azure_managed";
+    challenge.providerSettings = {
+      ["provider.azuredns.environment"]: "public",
+      ["provider.azuredns.private_zone"]: "false",
+      ["provider.azuredns.auth_method"]: "msi",
+    };
+    draft.challenges = [challenge];
+    render(
+      <ChallengesEditor
+        creation
+        disabled={false}
+        draft={draft}
+        issues={[]}
+        mutate={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByText("Explicit cloud identity boundary"),
+    ).toBeInTheDocument();
+    const mode = screen.getByLabelText("Authentication mode");
+    expect(
+      within(mode).getByRole("option", { name: "Workload identity" }),
+    ).toBeInTheDocument();
+    expect(
+      within(mode).getByRole("option", { name: "Azure CLI cache" }),
+    ).toBeInTheDocument();
+    expect(
+      within(mode).getByRole("option", { name: "Azure Pipelines identity" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Optional Azure Arc IMDS endpoint"),
+    ).toBeInTheDocument();
+  });
 });

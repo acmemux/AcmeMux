@@ -6,23 +6,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
-// TestCredentialedCoreDNSProviderSmoke is an explicit release gate, never an
+// TestCredentialedDNSProviderSmoke is an explicit release gate, never an
 // ordinary test. It invokes an administrator-supplied qualified lego artifact
 // and isolated native workspace while discarding all upstream output so a
 // provider response cannot enter test logs. The native configuration owns its
 // restrictive envFile and credentials exactly as it does in production.
-func TestCredentialedCoreDNSProviderSmoke(t *testing.T) {
+func TestCredentialedDNSProviderSmoke(t *testing.T) {
 	if os.Getenv("ACMEMUX_PROVIDER_SMOKE") != "1" {
 		t.Skip("credentialed provider smoke is not enabled")
 	}
 	provider := os.Getenv("ACMEMUX_PROVIDER_SMOKE_PROVIDER")
-	if !SupportsCoreDNSProvider(provider) {
-		t.Fatal("ACMEMUX_PROVIDER_SMOKE_PROVIDER must name a Task 09 provider")
+	if !slices.Contains(SupportedDNSProviders(), provider) {
+		t.Fatal("ACMEMUX_PROVIDER_SMOKE_PROVIDER must name a curated DNS provider")
 	}
 	executable := os.Getenv("ACMEMUX_TEST_LEGO")
 	configuration := os.Getenv("ACMEMUX_PROVIDER_SMOKE_CONFIG")
