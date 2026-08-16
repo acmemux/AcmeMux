@@ -19,6 +19,7 @@ import (
 	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
 	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
 	"github.com/sgurden-certleap/AcmeMux/internal/operation"
+	"github.com/sgurden-certleap/AcmeMux/internal/scheduler"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
 
@@ -53,20 +54,30 @@ type OperationService interface {
 	Policy() operation.Policy
 }
 
+type AutomaticScheduleService interface {
+	Get(context.Context) (scheduler.Schedule, error)
+	Update(context.Context, scheduler.Update) (scheduler.Schedule, error)
+}
+
 type OperationDependencies struct {
-	Service OperationService
+	Service   OperationService
+	Scheduler AutomaticScheduleService
 }
 
 func (dependencies OperationDependencies) validate() (OperationDependencies, error) {
 	if dependencies.Service == nil {
 		return OperationDependencies{}, errors.New("native operation service is required")
 	}
+	if dependencies.Scheduler == nil {
+		return OperationDependencies{}, errors.New("automatic schedule service is required")
+	}
 	return dependencies, nil
 }
 
 type operationEndpoints struct {
-	identity *identityEndpoints
-	service  OperationService
+	identity  *identityEndpoints
+	service   OperationService
+	scheduler AutomaticScheduleService
 }
 
 type operationAuthorization struct {
@@ -197,7 +208,7 @@ func newOperationEndpoints(identityAPI *identityEndpoints, dependencies Operatio
 	if err != nil {
 		return nil, err
 	}
-	return &operationEndpoints{identity: identityAPI, service: validated.Service}, nil
+	return &operationEndpoints{identity: identityAPI, service: validated.Service, scheduler: validated.Scheduler}, nil
 }
 
 func (endpoints *operationEndpoints) register(multiplexer *http.ServeMux) {
@@ -206,6 +217,8 @@ func (endpoints *operationEndpoints) register(multiplexer *http.ServeMux) {
 	multiplexer.HandleFunc("GET /api/v1/operations/cancel-policy", endpoints.getCancelPolicy)
 	multiplexer.HandleFunc("POST /api/v1/operations/manual/previews", endpoints.previewManual)
 	multiplexer.HandleFunc("POST /api/v1/operations/manual", endpoints.enqueueManual)
+	multiplexer.HandleFunc("GET /api/v1/automatic-schedule", endpoints.getAutomaticSchedule)
+	multiplexer.HandleFunc("PUT /api/v1/automatic-schedule", endpoints.updateAutomaticSchedule)
 }
 
 func (endpoints *operationEndpoints) getStatus(response http.ResponseWriter, request *http.Request) {
@@ -491,7 +504,7 @@ func presentOperationPolicy(policy operation.Policy) (operationPolicy, bool) {
 }
 
 func presentActiveOperation(value jobs.Operation) (activeOperationResponse, bool) {
-	if value.Kind != jobs.KindManual || (value.State != jobs.StateQueued && value.State != jobs.StateRunning) ||
+	if (value.Kind != jobs.KindManual && value.Kind != jobs.KindScheduled) || (value.State != jobs.StateQueued && value.State != jobs.StateRunning) ||
 		!operationIDPattern.MatchString(value.ID) || value.RequestedAt.IsZero() {
 		return activeOperationResponse{}, false
 	}
@@ -502,7 +515,7 @@ func presentActiveOperation(value jobs.Operation) (activeOperationResponse, bool
 		return activeOperationResponse{}, false
 	}
 	result := activeOperationResponse{
-		ID: value.ID, Kind: "manual", State: string(value.State), Phase: string(value.Phase),
+		ID: value.ID, Kind: string(value.Kind), State: string(value.State), Phase: string(value.Phase),
 		RequestedAt: value.RequestedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if !value.StartedAt.IsZero() {
@@ -513,7 +526,7 @@ func presentActiveOperation(value jobs.Operation) (activeOperationResponse, bool
 }
 
 func presentTerminalOperation(value jobs.Operation) (terminalOperationResult, bool) {
-	if value.Kind != jobs.KindManual || !value.Terminal() || !operationIDPattern.MatchString(value.ID) ||
+	if (value.Kind != jobs.KindManual && value.Kind != jobs.KindScheduled) || !value.Terminal() || !operationIDPattern.MatchString(value.ID) ||
 		!operationReasonPattern.MatchString(value.Code) || value.RequestedAt.IsZero() ||
 		value.StartedAt.IsZero() || value.FinishedAt.IsZero() || len(value.Items) == 0 || len(value.Items) > 256 ||
 		len(value.Output) > 256<<10 || !utf8.ValidString(value.Output) ||
@@ -524,7 +537,7 @@ func presentTerminalOperation(value jobs.Operation) (terminalOperationResult, bo
 		return terminalOperationResult{}, false
 	}
 	result := terminalOperationResult{
-		ID: value.ID, Kind: "manual", State: string(value.State), ReasonCode: value.Code,
+		ID: value.ID, Kind: string(value.Kind), State: string(value.State), ReasonCode: value.Code,
 		RequestedAt: value.RequestedAt.UTC().Format(time.RFC3339Nano),
 		FinishedAt:  value.FinishedAt.UTC().Format(time.RFC3339Nano), MayHaveChanged: value.MayHaveChanged,
 		Output:       operationOutput{Text: value.Output, Truncated: value.OutputTruncated},

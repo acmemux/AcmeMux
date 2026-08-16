@@ -105,7 +105,7 @@ export type ManualOperationPreview = {
 
 export type ActiveOperation = {
   id: string;
-  kind: "manual";
+  kind: "manual" | "scheduled";
   state: "queued" | "running";
   phase: "queued" | "revalidating" | "executing" | "refreshing_inventory";
   requestedAt: string;
@@ -123,7 +123,7 @@ export type CertificateOperationResult = {
 
 export type TerminalOperationResult = {
   id: string;
-  kind: "manual";
+  kind: "manual" | "scheduled";
   state:
     | "succeeded"
     | "failed"
@@ -159,6 +159,22 @@ export type TerminalOperationResult = {
 export type LatestOperation =
   { state: "empty" } | { state: "available"; result: TerminalOperationResult };
 
+export type AutomaticSchedule = {
+  state: "disabled" | "scheduled" | "due" | "deferred" | "blocked";
+  enabled: boolean;
+  timeZone: string | null;
+  localTime: string | null;
+  nextEvaluationAt: string | null;
+  lastTriggeredAt: string | null;
+  reasonCode: string;
+};
+
+export type AutomaticScheduleUpdate = {
+  enabled: boolean;
+  timeZone: string;
+  localTime: string;
+};
+
 export type OperationErrorCode =
   | "authentication_required"
   | "request_not_allowed"
@@ -191,6 +207,10 @@ export interface OperationClient {
   getCancelPolicy(): Promise<OperationPolicy>;
   previewManual(): Promise<ManualOperationPreview>;
   enqueueManual(reviewedPreviewToken: string): Promise<ActiveOperation>;
+  getAutomaticSchedule(): Promise<AutomaticSchedule>;
+  updateAutomaticSchedule(
+    update: AutomaticScheduleUpdate,
+  ): Promise<AutomaticSchedule>;
 }
 
 type OperationClientOptions = {
@@ -567,7 +587,7 @@ function decodeActiveOperation(value: unknown): ActiveOperation {
     ]) ||
     typeof value.id !== "string" ||
     !operationIdPattern.test(value.id) ||
-    value.kind !== "manual" ||
+    (value.kind !== "manual" && value.kind !== "scheduled") ||
     (value.state !== "queued" && value.state !== "running") ||
     (value.phase !== "queued" &&
       value.phase !== "revalidating" &&
@@ -586,7 +606,7 @@ function decodeActiveOperation(value: unknown): ActiveOperation {
   }
   return {
     id: value.id,
-    kind: "manual",
+    kind: value.kind,
     state: value.state,
     phase: value.phase,
     requestedAt: value.requestedAt,
@@ -674,7 +694,7 @@ function decodeTerminalResult(value: unknown): TerminalOperationResult {
     ]) ||
     typeof value.id !== "string" ||
     !operationIdPattern.test(value.id) ||
-    value.kind !== "manual" ||
+    (value.kind !== "manual" && value.kind !== "scheduled") ||
     (value.state !== "succeeded" &&
       value.state !== "failed" &&
       value.state !== "partial" &&
@@ -713,7 +733,7 @@ function decodeTerminalResult(value: unknown): TerminalOperationResult {
   }
   return {
     id: value.id,
-    kind: "manual",
+    kind: value.kind,
     state: value.state,
     reasonCode: value.reasonCode,
     requestedAt: value.requestedAt,
@@ -736,6 +756,56 @@ function decodeLatest(value: unknown): LatestOperation {
     return { state: "available", result: decodeTerminalResult(value.result) };
   }
   invalidResponse();
+}
+
+const localTimePattern = /^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/;
+
+function decodeAutomaticSchedule(value: unknown): AutomaticSchedule {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "state",
+      "enabled",
+      "timeZone",
+      "localTime",
+      "nextEvaluationAt",
+      "lastTriggeredAt",
+      "reasonCode",
+    ]) ||
+    (value.state !== "disabled" &&
+      value.state !== "scheduled" &&
+      value.state !== "due" &&
+      value.state !== "deferred" &&
+      value.state !== "blocked") ||
+    typeof value.enabled !== "boolean" ||
+    (value.timeZone !== null && !boundedText(value.timeZone, 128)) ||
+    (value.localTime !== null &&
+      (typeof value.localTime !== "string" ||
+        !localTimePattern.test(value.localTime))) ||
+    (value.nextEvaluationAt !== null &&
+      !validTimestamp(value.nextEvaluationAt)) ||
+    (value.lastTriggeredAt !== null &&
+      !validTimestamp(value.lastTriggeredAt)) ||
+    typeof value.reasonCode !== "string" ||
+    !reasonCodePattern.test(value.reasonCode) ||
+    (value.enabled &&
+      (value.timeZone === null ||
+        value.localTime === null ||
+        value.nextEvaluationAt === null)) ||
+    (!value.enabled && value.nextEvaluationAt !== null) ||
+    (value.timeZone === null) !== (value.localTime === null)
+  ) {
+    invalidResponse();
+  }
+  return {
+    state: value.state,
+    enabled: value.enabled,
+    timeZone: value.timeZone,
+    localTime: value.localTime,
+    nextEvaluationAt: value.nextEvaluationAt,
+    lastTriggeredAt: value.lastTriggeredAt,
+    reasonCode: value.reasonCode,
+  };
 }
 
 function isJSONContentType(value: string): boolean {
@@ -919,6 +989,28 @@ export function createOperationClient(
         invalidResponse();
       }
       return decodeActiveOperation(value.operation);
+    },
+    async getAutomaticSchedule() {
+      return decodeAutomaticSchedule(
+        await send("/api/v1/automatic-schedule", { method: "GET" }, 200),
+      );
+    },
+    async updateAutomaticSchedule(update) {
+      if (
+        typeof update.enabled !== "boolean" ||
+        !boundedText(update.timeZone, 128) ||
+        !localTimePattern.test(update.localTime)
+      ) {
+        throw new OperationRequestError("invalid_request", 0);
+      }
+      return decodeAutomaticSchedule(
+        await send(
+          "/api/v1/automatic-schedule",
+          { body: JSON.stringify(update), method: "PUT" },
+          200,
+          true,
+        ),
+      );
     },
   };
 }

@@ -69,6 +69,7 @@ The manual-operation boundary has focused suites as well:
 ```sh
 make test-broker
 make test-jobs
+make test-scheduler
 make test-redaction
 ACMEMUX_TEST_LEGO=/absolute/path/to/source-built/lego \
 ACMEMUX_TEST_PEBBLE=/absolute/path/to/pebble-v2.10.1 \
@@ -86,6 +87,11 @@ result classification, and mandatory inventory reconciliation. The opt-in
 source-built check requires explicit canonical paths for the reviewed
 executable, pinned Pebble v2.10.1 and challenge-server executables, and the
 matching upstream source fixtures; none are selected from the host `PATH`.
+The scheduler suite adds controllable-clock coverage for UTC persistence,
+IANA zones, daylight-saving gaps and repetitions, clock jumps, missed-date
+coalescing, manual-operation contention, ordinary restart, and non-replay
+recovery. It uses the same operation fakes rather than replacing upstream
+renewal eligibility with a scheduler algorithm.
 It starts the local upstream ACME infrastructure, obtains a real test
 certificate through the broker, verifies native account and certificate
 artifacts, then runs file mode again and proves upstream evaluated and skipped

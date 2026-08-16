@@ -79,3 +79,6 @@ process boundary, reconciliation, and safe failure handling are documented in
 DigitalOcean, and DuckDNS authentication, least privilege, native mappings,
 rotation, optional settings, and troubleshooting are documented in
 [docs/dns-providers.md](docs/dns-providers.md).
+Typed daily scheduling, IANA-zone and UTC behavior, missed-run coalescing,
+restart safety, upstream ARI authority, and clock troubleshooting are
+documented in [docs/automatic-renewal.md](docs/automatic-renewal.md).

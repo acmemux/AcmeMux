@@ -39,6 +39,7 @@ import {
 } from "./WorkspacePanel";
 import {
   OperationsPanel,
+  automaticScheduleSignal,
   operationSignal,
   useOperationController,
 } from "./OperationsPanel";
@@ -274,8 +275,11 @@ export function OverviewPage({
     },
     {
       label: "Automatic evaluation",
-      state: "Not scheduled",
-      detail: "No background certificate operation is enabled.",
+      state: automaticScheduleSignal(operations),
+      detail:
+        operations.schedule?.enabled === true
+          ? `Daily at ${operations.schedule.localTime} ${operations.schedule.timeZone}; next ${operations.schedule.nextEvaluationAt} UTC.`
+          : "No background certificate operation is enabled.",
     },
   ];
 

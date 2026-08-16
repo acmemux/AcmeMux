@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   OperationRequestError,
   browserOperationClient,
+  type AutomaticSchedule,
+  type AutomaticScheduleUpdate,
   type LatestOperation,
   type ManualOperationPreview,
   type OperationClient,
@@ -29,10 +31,14 @@ export type OperationController = {
   policy: OperationPolicy | null;
   preview: ManualOperationPreview | null;
   status: OperationStatus | null;
+  schedule: AutomaticSchedule | null;
+  scheduleError: string | null;
+  scheduleSaving: boolean;
   dismissPreview(): void;
   enqueueManual(): Promise<void>;
   previewManual(): Promise<void>;
   refresh(): Promise<void>;
+  saveSchedule(update: AutomaticScheduleUpdate): Promise<void>;
 };
 
 function safeRequestMessage(error: unknown): string {
@@ -87,6 +93,9 @@ export function useOperationController(
   const [actionError, setActionError] = useState<string | null>(null);
   const [enqueueOutcomeUnknown, setEnqueueOutcomeUnknown] = useState(false);
   const [completionRevision, setCompletionRevision] = useState(0);
+  const [schedule, setSchedule] = useState<AutomaticSchedule | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
   const mounted = useRef(true);
   const loadVersion = useRef(0);
   const actionActive = useRef(false);
@@ -132,15 +141,21 @@ export function useOperationController(
       const version = ++loadVersion.current;
       setPhase("loading");
       setError(null);
-      const [statusResult, latestResult, policyResult] =
+      const [statusResult, latestResult, policyResult, scheduleResult] =
         await Promise.allSettled([
           client.getStatus(),
           client.getLatest(),
           client.getCancelPolicy(),
+          client.getAutomaticSchedule(),
         ]);
       if (!mounted.current || loadVersion.current !== version) return;
 
-      const failures = [statusResult, latestResult, policyResult].filter(
+      const failures = [
+        statusResult,
+        latestResult,
+        policyResult,
+        scheduleResult,
+      ].filter(
         (result): result is PromiseRejectedResult =>
           result.status === "rejected",
       );
@@ -163,8 +178,22 @@ export function useOperationController(
         applyLatest(latestResult.value, initialLoadComplete.current);
       }
       if (policyResult.status === "fulfilled") setPolicy(policyResult.value);
-      if (failures.length > 0) {
-        setError(safeRequestMessage(failures[0]?.reason));
+      if (scheduleResult.status === "fulfilled") {
+        setSchedule(scheduleResult.value);
+        setScheduleError(null);
+      } else {
+        setScheduleError(safeRequestMessage(scheduleResult.reason));
+      }
+      const operationFailures = [
+        statusResult,
+        latestResult,
+        policyResult,
+      ].filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      if (operationFailures.length > 0) {
+        setError(safeRequestMessage(operationFailures[0]?.reason));
       }
       initialLoadComplete.current = true;
       setPhase("idle");
@@ -233,6 +262,65 @@ export function useOperationController(
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [applyLatest, client, handleProtectedError, polledOperationID]);
+
+  const automaticPollingEnabled =
+    schedule?.enabled === true && polledOperationID === null;
+
+  useEffect(() => {
+    if (!automaticPollingEnabled) return;
+    let canceled = false;
+    let timer: number | undefined;
+
+    async function pollAutomaticEvidence() {
+      if (actionActive.current) {
+        timer = window.setTimeout(() => void pollAutomaticEvidence(), 15_000);
+        return;
+      }
+      const [statusResult, scheduleResult] = await Promise.allSettled([
+        client.getStatus(),
+        client.getAutomaticSchedule(),
+      ]);
+      if (canceled || !mounted.current) return;
+      const failure = [statusResult, scheduleResult].find(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      if (failure && handleProtectedError(failure.reason)) return;
+
+      if (scheduleResult.status === "fulfilled") {
+        setSchedule(scheduleResult.value);
+        setScheduleError(null);
+      } else {
+        setScheduleError(safeRequestMessage(scheduleResult.reason));
+      }
+      if (statusResult.status === "fulfilled") {
+        setStatus(statusResult.value);
+        if (statusResult.value.state === "active") {
+          activeOperationID.current = statusResult.value.operation.id;
+          return;
+        }
+        activeOperationID.current = null;
+        try {
+          const nextLatest = await client.getLatest();
+          if (canceled || !mounted.current) return;
+          applyLatest(nextLatest, true);
+          setError(null);
+        } catch (requestError) {
+          if (canceled || handleProtectedError(requestError)) return;
+          setError(safeRequestMessage(requestError));
+        }
+      } else {
+        setError(safeRequestMessage(statusResult.reason));
+      }
+      timer = window.setTimeout(() => void pollAutomaticEvidence(), 15_000);
+    }
+
+    timer = window.setTimeout(() => void pollAutomaticEvidence(), 15_000);
+    return () => {
+      canceled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [applyLatest, automaticPollingEnabled, client, handleProtectedError]);
 
   const previewManual = useCallback(async () => {
     if (
@@ -375,6 +463,25 @@ export function useOperationController(
     if (!actionActive.current) setPreview(null);
   }, []);
 
+  const saveSchedule = useCallback(
+    async (update: AutomaticScheduleUpdate) => {
+      if (scheduleSaving) return;
+      setScheduleSaving(true);
+      setScheduleError(null);
+      try {
+        const saved = await client.updateAutomaticSchedule(update);
+        if (mounted.current) setSchedule(saved);
+      } catch (requestError) {
+        if (!handleProtectedError(requestError) && mounted.current) {
+          setScheduleError(safeRequestMessage(requestError));
+        }
+      } finally {
+        if (mounted.current) setScheduleSaving(false);
+      }
+    },
+    [client, handleProtectedError, scheduleSaving],
+  );
+
   const blocksWorkspaceMutations =
     phase !== "idle" ||
     status === null ||
@@ -397,6 +504,10 @@ export function useOperationController(
     preview,
     previewManual,
     refresh: loadEvidence,
+    saveSchedule,
+    schedule,
+    scheduleError,
+    scheduleSaving,
     status,
   };
 }
@@ -460,6 +571,217 @@ function words(code: string): string {
   return code.replaceAll("_", " ");
 }
 
+function scheduleStateLabel(state: AutomaticSchedule["state"]): string {
+  switch (state) {
+    case "disabled":
+      return "Disabled";
+    case "scheduled":
+      return "Scheduled";
+    case "due":
+      return "Due";
+    case "deferred":
+      return "Deferred";
+    case "blocked":
+      return "Needs attention";
+  }
+}
+
+function scheduleTone(state: AutomaticSchedule["state"]): StatusTone {
+  switch (state) {
+    case "scheduled":
+      return "success";
+    case "due":
+      return "info";
+    case "deferred":
+      return "warning";
+    case "blocked":
+      return "danger";
+    case "disabled":
+      return "not-attempted";
+  }
+}
+
+function detectedTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function AutomaticScheduleControl({
+  controller,
+}: {
+  controller: OperationController;
+}) {
+  const schedule = controller.schedule;
+  const formKey = `${schedule?.enabled ?? false}:${schedule?.timeZone ?? ""}:${schedule?.localTime ?? ""}`;
+  return (
+    <section
+      className="am-automatic-schedule"
+      aria-labelledby="automatic-schedule-heading"
+    >
+      <div className="am-panel__heading">
+        <div>
+          <p className="am-kicker">OPS / daily automatic evaluation</p>
+          <h3 id="automatic-schedule-heading">Automatic renewal evaluation</h3>
+          <p>
+            AcmeMux schedules one native workspace evaluation each local day.
+            Upstream lego alone applies ARI, certificate lifetime rules, and its
+            renewal delay.
+          </p>
+        </div>
+        <StatusBadge
+          tone={
+            schedule === null ? "not-attempted" : scheduleTone(schedule.state)
+          }
+        >
+          {schedule === null
+            ? "Unavailable"
+            : scheduleStateLabel(schedule.state)}
+        </StatusBadge>
+      </div>
+
+      {controller.scheduleError ? (
+        <FeedbackPanel tone="warning" title="Schedule evidence unavailable">
+          <p>{controller.scheduleError}</p>
+        </FeedbackPanel>
+      ) : null}
+
+      <form
+        className="am-schedule-form"
+        key={formKey}
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          void controller.saveSchedule({
+            enabled: form.get("enabled") === "on",
+            timeZone: String(form.get("timeZone") ?? ""),
+            localTime: String(form.get("localTime") ?? ""),
+          });
+        }}
+      >
+        <label className="am-schedule-toggle">
+          <input
+            defaultChecked={schedule?.enabled ?? false}
+            disabled={controller.scheduleSaving || schedule === null}
+            name="enabled"
+            type="checkbox"
+          />
+          <span>
+            <strong>Enable daily evaluation</strong>
+            <small>Disabled schedules never start background operations.</small>
+          </span>
+        </label>
+        <label className="am-schedule-field">
+          <span>IANA time zone</span>
+          <input
+            autoComplete="off"
+            disabled={controller.scheduleSaving || schedule === null}
+            defaultValue={schedule?.timeZone ?? detectedTimeZone()}
+            maxLength={128}
+            name="timeZone"
+            placeholder="America/Denver"
+            required
+            type="text"
+          />
+          <small>Daily wall-clock behavior follows this named zone.</small>
+        </label>
+        <label className="am-schedule-field">
+          <span>Local evaluation time</span>
+          <input
+            disabled={controller.scheduleSaving || schedule === null}
+            defaultValue={schedule?.localTime ?? "03:35"}
+            name="localTime"
+            required
+            step={60}
+            type="time"
+          />
+          <small>
+            One occurrence per local date; no cron syntax or backlog.
+          </small>
+        </label>
+        <ActionButton
+          isDisabled={schedule === null || controller.scheduleSaving}
+          isPending={controller.scheduleSaving}
+          type="submit"
+        >
+          {controller.scheduleSaving
+            ? "Saving schedule"
+            : "Save automatic schedule"}
+        </ActionButton>
+      </form>
+
+      {schedule !== null ? (
+        <dl className="am-schedule-facts">
+          <div>
+            <dt>Daily local time</dt>
+            <dd>
+              {schedule.timeZone === null || schedule.localTime === null
+                ? "Not configured"
+                : `${schedule.localTime} ${schedule.timeZone}`}
+            </dd>
+          </div>
+          <div>
+            <dt>Next exact UTC evaluation</dt>
+            <dd>
+              {schedule.nextEvaluationAt === null ? (
+                "Not scheduled"
+              ) : (
+                <time dateTime={schedule.nextEvaluationAt}>
+                  {schedule.nextEvaluationAt}
+                </time>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>Last scheduler trigger</dt>
+            <dd>
+              {schedule.lastTriggeredAt === null ? (
+                "Not yet triggered"
+              ) : (
+                <time dateTime={schedule.lastTriggeredAt}>
+                  {schedule.lastTriggeredAt}
+                </time>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>Scheduler state</dt>
+            <dd>{words(schedule.reasonCode)}</dd>
+          </div>
+        </dl>
+      ) : null}
+
+      {schedule?.state === "deferred" ? (
+        <FeedbackPanel tone="warning" title="Due evaluation is deferred">
+          <p>
+            Another accepted workspace action owns the operation boundary. One
+            coalesced evaluation remains due and will run after contention
+            clears.
+          </p>
+        </FeedbackPanel>
+      ) : null}
+      {schedule?.state === "blocked" ? (
+        <FeedbackPanel
+          tone="danger"
+          title="Automatic evaluation needs attention"
+        >
+          <p>
+            The due evaluation could not be accepted from current runtime,
+            workspace, or configuration evidence. AcmeMux did not retry it
+            blindly; the next ordinary daily occurrence remains scheduled.
+          </p>
+        </FeedbackPanel>
+      ) : null}
+      <p className="am-operation-boundary">
+        Missed dates coalesce into one evaluation. A service-interrupted run is
+        reconciled and never replayed automatically.
+      </p>
+    </section>
+  );
+}
+
 function LatestResult({ result }: { result: TerminalOperationResult }) {
   return (
     <section
@@ -468,7 +790,10 @@ function LatestResult({ result }: { result: TerminalOperationResult }) {
     >
       <div className="am-panel__heading">
         <div>
-          <p className="am-kicker">Latest bounded result</p>
+          <p className="am-kicker">
+            Latest bounded{" "}
+            {result.kind === "scheduled" ? "automatic" : "manual"} result
+          </p>
           <h3 id="latest-operation-heading">{stateLabel(result.state)}</h3>
         </div>
         <StatusBadge tone={stateTone(result.state)}>
@@ -477,6 +802,14 @@ function LatestResult({ result }: { result: TerminalOperationResult }) {
       </div>
 
       <dl className="am-operation-result__facts">
+        <div>
+          <dt>Trigger</dt>
+          <dd>
+            {result.kind === "scheduled"
+              ? "Automatic schedule"
+              : "Administrator"}
+          </dd>
+        </div>
         <div>
           <dt>Requested</dt>
           <dd>
@@ -602,6 +935,13 @@ export function operationSignal(controller: OperationController): string {
   return "Ready";
 }
 
+export function automaticScheduleSignal(
+  controller: OperationController,
+): string {
+  if (controller.schedule === null) return "Checking";
+  return scheduleStateLabel(controller.schedule.state);
+}
+
 export function OperationsPanel({
   controller,
   executionReady,
@@ -626,11 +966,11 @@ export function OperationsPanel({
     >
       <div className="am-operations__heading">
         <div>
-          <p className="am-kicker">OPS / manual workspace run</p>
-          <h2 id="operations-heading">Manual certificate operation</h2>
+          <p className="am-kicker">OPS / automatic and manual workspace runs</p>
+          <h2 id="operations-heading">Certificate operations</h2>
           <p>
-            Review and durably enqueue one constrained upstream lego file-mode
-            run for the entire native workspace.
+            Schedule or review one constrained upstream lego file-mode run for
+            the entire native workspace. Every accepted run is durable.
           </p>
         </div>
         <StatusBadge
@@ -682,6 +1022,8 @@ export function OperationsPanel({
         </FeedbackPanel>
       ) : null}
 
+      <AutomaticScheduleControl controller={controller} />
+
       {active ? (
         <section
           className="am-operation-active"
@@ -692,8 +1034,12 @@ export function OperationsPanel({
             <p className="am-kicker">Durable worker state</p>
             <h3 id="active-operation-heading">
               {active.state === "queued"
-                ? "Operation queued"
-                : "Operation running"}
+                ? active.kind === "scheduled"
+                  ? "Automatic evaluation queued"
+                  : "Operation queued"
+                : active.kind === "scheduled"
+                  ? "Automatic evaluation running"
+                  : "Operation running"}
             </h3>
             <p>
               Phase: <strong>{words(active.phase)}</strong>. Closing or

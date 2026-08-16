@@ -252,6 +252,21 @@ workspace, source, certificate, and policy evidence. Enqueue reconstructs that
 evidence, compares the token in constant time, and revalidates the original
 session and CSRF pair immediately before committing work to SQLite.
 
+Automatic schedule reads require the same authenticated browser boundary, and
+schedule changes additionally require Origin, CSRF, and immediate session
+reauthorization. The mutation accepts only an enable flag, bounded IANA zone,
+and exact local `HH:MM` time; it is not a cron, command, flag, environment, or
+per-certificate execution surface. SQLite retains only that singleton policy,
+UTC trigger instants, a local-date replay guard, and bounded reason state.
+
+The scheduler can accept work without a live browser only after the policy has
+been saved. It waits for durable-operation startup reconciliation, shares the
+latest-only operation slot and workspace coordinator, and cannot overlap a
+manual run or native edit. Crash-window claims and interrupted processes
+advance without automatic replay. Scheduled operations use the identical
+controlled environment, secret redaction, timeout, termination, and inventory
+reconciliation boundary described below.
+
 For Azure DNS and Route 53, the preview also names the selected authentication
 mode and every non-secret file, helper, or metadata consequence. The broker
 inherits no service environment and supplies no default `HOME`. Credential

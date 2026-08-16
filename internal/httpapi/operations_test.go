@@ -18,6 +18,7 @@ import (
 	"github.com/sgurden-certleap/AcmeMux/internal/identity"
 	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
 	"github.com/sgurden-certleap/AcmeMux/internal/operation"
+	"github.com/sgurden-certleap/AcmeMux/internal/scheduler"
 	"github.com/sgurden-certleap/AcmeMux/internal/state"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
@@ -41,6 +42,23 @@ type operationServiceStub struct {
 	latest    jobs.Operation
 	latestErr error
 	policy    operation.Policy
+}
+
+type scheduleServiceStub struct {
+	value       scheduler.Schedule
+	err         error
+	update      scheduler.Update
+	updateCalls int
+}
+
+func (stub *scheduleServiceStub) Get(context.Context) (scheduler.Schedule, error) {
+	return stub.value, stub.err
+}
+
+func (stub *scheduleServiceStub) Update(_ context.Context, update scheduler.Update) (scheduler.Schedule, error) {
+	stub.updateCalls++
+	stub.update = update
+	return stub.value, stub.err
 }
 
 func (stub *operationServiceStub) Preview(context.Context) (operation.Preview, error) {
@@ -82,6 +100,7 @@ type operationHTTPHarness struct {
 	csrf     string
 	identity *identity.Service
 	service  *operationServiceStub
+	schedule *scheduleServiceStub
 }
 
 func newOperationHTTPHarness(t *testing.T) *operationHTTPHarness {
@@ -103,9 +122,12 @@ func newOperationHTTPHarness(t *testing.T) *operationHTTPHarness {
 		enqueueResult: activeOperationFixture(), status: activeOperationFixture(),
 		latest: terminalOperationFixture(),
 	}
+	schedule := &scheduleServiceStub{
+		value: scheduler.Schedule{State: scheduler.StateDisabled, ReasonCode: "not_configured"},
+	}
 	handler, err := New(
 		database, identityService, testRuntimeDependencies(), testWorkspaceDependencies(),
-		testConfigurationDependencies(), OperationDependencies{Service: service},
+		testConfigurationDependencies(), OperationDependencies{Service: service, Scheduler: schedule},
 		fstest.MapFS{"index.html": {Data: []byte("browser")}},
 		SecurityConfig{PublicOrigin: identityTestOrigin},
 	)
@@ -119,7 +141,7 @@ func newOperationHTTPHarness(t *testing.T) *operationHTTPHarness {
 	cookies := responseCookies(login)
 	return &operationHTTPHarness{
 		handler: handler, cookies: cookies, csrf: namedCookie(t, cookies, csrfCookieName).Value,
-		identity: identityService, service: service,
+		identity: identityService, service: service, schedule: schedule,
 	}
 }
 
@@ -222,6 +244,67 @@ func TestOperationEndpointsPresentBoundedPreviewLifecycleAndResult(t *testing.T)
 		!strings.Contains(latest.Body.String(), `"reasonCode":"execution_succeeded"`) ||
 		!strings.Contains(latest.Body.String(), `"certificateCount":1`) {
 		t.Fatalf("latest response = %d %s", latest.Code, latest.Body.String())
+	}
+}
+
+func TestAutomaticScheduleEndpointsPresentTypedUTCPolicyAndStrictMutation(t *testing.T) {
+	harness := newOperationHTTPHarness(t)
+	disabled := harness.request(t, http.MethodGet, "/api/v1/automatic-schedule", "", false)
+	if disabled.Code != http.StatusOK {
+		t.Fatalf("disabled schedule status = %d, body = %s", disabled.Code, disabled.Body.String())
+	}
+	var disabledBody map[string]any
+	if err := json.Unmarshal(disabled.Body.Bytes(), &disabledBody); err != nil {
+		t.Fatal(err)
+	}
+	if disabledBody["state"] != "disabled" || disabledBody["enabled"] != false ||
+		disabledBody["timeZone"] != nil || disabledBody["nextEvaluationAt"] != nil {
+		t.Fatalf("disabled schedule = %#v", disabledBody)
+	}
+
+	harness.schedule.value = scheduler.Schedule{
+		Configured: true, Enabled: true, State: scheduler.StateScheduled,
+		TimeZone: "America/Denver", LocalMinute: 3*60 + 35,
+		NextEvaluation:  time.Date(2026, 8, 17, 9, 35, 0, 0, time.UTC),
+		LastTriggeredAt: time.Date(2026, 8, 16, 9, 35, 0, 0, time.UTC),
+		ReasonCode:      "schedule_saved", UpdatedAt: time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC),
+	}
+	updated := harness.request(t, http.MethodPut, "/api/v1/automatic-schedule", `{"enabled":true,"timeZone":"America/Denver","localTime":"03:35"}`, true)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("schedule update status = %d, body = %s", updated.Code, updated.Body.String())
+	}
+	if harness.schedule.updateCalls != 1 || !harness.schedule.update.Enabled ||
+		harness.schedule.update.TimeZone != "America/Denver" || harness.schedule.update.LocalMinute != 215 {
+		t.Fatalf("schedule update = %#v calls=%d", harness.schedule.update, harness.schedule.updateCalls)
+	}
+	var updatedBody map[string]any
+	if err := json.Unmarshal(updated.Body.Bytes(), &updatedBody); err != nil {
+		t.Fatal(err)
+	}
+	if updatedBody["localTime"] != "03:35" || updatedBody["nextEvaluationAt"] != "2026-08-17T09:35:00Z" {
+		t.Fatalf("updated schedule response = %#v", updatedBody)
+	}
+
+	for _, body := range []string{
+		`{"enabled":true,"timeZone":"America/Denver","localTime":"3:35"}`,
+		`{"enabled":true,"timeZone":"America/Denver","timeZone":"UTC","localTime":"03:35"}`,
+		`{"enabled":true,"timeZone":"America/Denver","localTime":"03:35","cron":"* * * * *"}`,
+	} {
+		response := harness.request(t, http.MethodPut, "/api/v1/automatic-schedule", body, true)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("invalid schedule status = %d, body = %s", response.Code, response.Body.String())
+		}
+	}
+
+	unauthenticated := newIdentityRequest(http.MethodGet, "/api/v1/automatic-schedule", "", nil, false)
+	response := httptest.NewRecorder()
+	harness.handler.ServeHTTP(response, unauthenticated)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated schedule status = %d", response.Code)
+	}
+	withoutCSRF := harness.request(t, http.MethodPut, "/api/v1/automatic-schedule", `{"enabled":false,"timeZone":"UTC","localTime":"03:35"}`, false)
+	if withoutCSRF.Code != http.StatusForbidden {
+		t.Fatalf("schedule without CSRF status = %d", withoutCSRF.Code)
 	}
 }
 

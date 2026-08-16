@@ -72,7 +72,10 @@ type Service struct {
 	pollInterval       time.Duration
 	persistenceTimeout time.Duration
 	wake               chan struct{}
+	ready              chan struct{}
+	readyOnce          sync.Once
 	running            atomic.Bool
+	interruptedOnStart atomic.Bool
 }
 
 // New creates the durable manual-operation service.
@@ -99,7 +102,7 @@ func New(database Database, executor Executor, optionValues ...Option) (*Service
 	return &Service{
 		store: store, executor: executor, now: options.now, random: options.random,
 		pollInterval: options.pollInterval, persistenceTimeout: options.persistenceTimeout,
-		wake: make(chan struct{}, 1),
+		wake: make(chan struct{}, 1), ready: make(chan struct{}),
 	}, nil
 }
 
@@ -108,6 +111,16 @@ func New(database Database, executor Executor, optionValues ...Option) (*Service
 // cannot erase the accepted request. Authorization is revalidated by the HTTP
 // boundary immediately before calling Enqueue and is not retained here.
 func (service *Service) Enqueue(ctx context.Context, request Request) (Operation, error) {
+	return service.enqueue(ctx, KindManual, request)
+}
+
+// EnqueueScheduled commits one trusted scheduler request through the same
+// latest-only durable worker used by manual operations.
+func (service *Service) EnqueueScheduled(ctx context.Context, request Request) (Operation, error) {
+	return service.enqueue(ctx, KindScheduled, request)
+}
+
+func (service *Service) enqueue(ctx context.Context, kind Kind, request Request) (Operation, error) {
 	if service == nil || service.store == nil || service.random == nil || service.now == nil {
 		return Operation{}, errors.New("operation service is not initialized")
 	}
@@ -118,7 +131,7 @@ func (service *Service) Enqueue(ctx context.Context, request Request) (Operation
 	if _, err := io.ReadFull(service.random, raw[:]); err != nil {
 		return Operation{}, errors.New("generate operation identifier")
 	}
-	operation, err := service.store.Enqueue(ctx, hex.EncodeToString(raw[:]), request, service.instant())
+	operation, err := service.store.EnqueueKind(ctx, hex.EncodeToString(raw[:]), kind, request, service.instant())
 	if err != nil {
 		return Operation{}, err
 	}
@@ -183,12 +196,15 @@ func (service *Service) Run(ctx context.Context) error {
 	}
 	defer service.running.Store(false)
 
-	if err := service.recover(ctx); err != nil {
+	interrupted, err := service.recover(ctx)
+	if err != nil {
 		if ctx.Err() != nil {
 			return nil
 		}
 		return err
 	}
+	service.interruptedOnStart.Store(interrupted)
+	service.readyOnce.Do(func() { close(service.ready) })
 	timer := time.NewTimer(service.pollInterval)
 	defer timer.Stop()
 	for {
@@ -233,18 +249,19 @@ func (service *Service) Run(ctx context.Context) error {
 	}
 }
 
-func (service *Service) recover(ctx context.Context) error {
-	if _, _, err := service.store.InterruptRunning(ctx, service.instant()); err != nil {
-		return err
+func (service *Service) recover(ctx context.Context) (bool, error) {
+	_, interrupted, err := service.store.InterruptRunning(ctx, service.instant())
+	if err != nil {
+		return false, err
 	}
 	operation, err := service.store.PendingReconciliation(ctx)
 	if errors.Is(err, ErrNotFound) {
-		return nil
+		return interrupted, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
-	return service.reconcile(ctx, operation)
+	return interrupted, service.reconcile(ctx, operation)
 }
 
 func (service *Service) execute(ctx context.Context, operation Operation) error {
@@ -355,4 +372,19 @@ func (service *Service) notify() {
 // intended for lifecycle coordination, not operation status.
 func (service *Service) Running() bool {
 	return service != nil && service.running.Load()
+}
+
+// Ready closes after startup interruption recovery and inventory
+// reconciliation complete, allowing the scheduler to avoid racing recovery.
+func (service *Service) Ready() <-chan struct{} {
+	if service == nil || service.ready == nil {
+		return nil
+	}
+	return service.ready
+}
+
+// InterruptedOnStart reports whether this worker reconciled an operation that
+// was running when the prior service lifetime ended. Call only after Ready.
+func (service *Service) InterruptedOnStart() bool {
+	return service != nil && service.interruptedOnStart.Load()
 }

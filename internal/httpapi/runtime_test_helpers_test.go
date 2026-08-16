@@ -12,6 +12,7 @@ import (
 	"github.com/sgurden-certleap/AcmeMux/internal/nativeconfig"
 	"github.com/sgurden-certleap/AcmeMux/internal/operation"
 	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
+	"github.com/sgurden-certleap/AcmeMux/internal/scheduler"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
 
@@ -161,6 +162,16 @@ func (inertOperationService) Latest(context.Context) (jobs.Operation, error) {
 
 func (inertOperationService) Policy() operation.Policy { return operation.DefaultPolicy() }
 
+type inertScheduleService struct{}
+
+func (inertScheduleService) Get(context.Context) (scheduler.Schedule, error) {
+	return scheduler.Schedule{State: scheduler.StateDisabled, ReasonCode: "not_configured"}, nil
+}
+
+func (inertScheduleService) Update(context.Context, scheduler.Update) (scheduler.Schedule, error) {
+	return scheduler.Schedule{}, errors.New("unexpected automatic schedule update")
+}
+
 func testOperationDependencies() OperationDependencies {
-	return OperationDependencies{Service: inertOperationService{}}
+	return OperationDependencies{Service: inertOperationService{}, Scheduler: inertScheduleService{}}
 }
