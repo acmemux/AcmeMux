@@ -75,4 +75,7 @@ HTTP-01 listener or webroot setup, and first-workspace creation are documented
 in [docs/ca-certificate-http.md](docs/ca-certificate-http.md). Reviewed manual
 workspace runs, durable browser-independent execution, the exact constrained
 process boundary, reconciliation, and safe failure handling are documented in
-[docs/manual-operations.md](docs/manual-operations.md).
+[docs/manual-operations.md](docs/manual-operations.md). Cloudflare,
+DigitalOcean, and DuckDNS authentication, least privilege, native mappings,
+rotation, optional settings, and troubleshooting are documented in
+[docs/dns-providers.md](docs/dns-providers.md).

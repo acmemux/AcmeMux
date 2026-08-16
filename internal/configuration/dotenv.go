@@ -140,7 +140,7 @@ func dotenvDiagnosticCode(err error) DiagnosticCode {
 	}
 }
 
-func applyDotenvPresence(inspection nativeconfig.Inspection, documents *dotenvDocuments) nativeconfig.Inspection {
+func applyDotenvPresence(inspection nativeconfig.Inspection, documents *dotenvDocuments, strict bool) nativeconfig.Inspection {
 	if documents == nil {
 		return inspection
 	}
@@ -151,12 +151,21 @@ func applyDotenvPresence(inspection nativeconfig.Inspection, documents *dotenvDo
 		}
 		for _, route := range managed.routes {
 			present, valid := managed.document.ValidatePresence(route.EnvironmentKey(), route.ValidValue)
-			presence = append(presence, nativeconfig.DotenvPresence{
+			observation := nativeconfig.DotenvPresence{
 				FieldID: route.FieldID(), Bindings: route.Bindings(), Present: present, Valid: valid,
-			})
+			}
+			if present && valid && !route.Secret() {
+				value, copied := managed.document.ValueCopy(route.EnvironmentKey())
+				if copied {
+					observation.Value = integrations.StringValue(string(value))
+					observation.HasValue = true
+					clear(value)
+				}
+			}
+			presence = append(presence, observation)
 		}
 	}
-	return inspection.WithDotenvPresence(presence)
+	return inspection.WithDotenvPresence(presence).WithCoreDNSCredentialValidation(strict)
 }
 
 func applyExternalChanges(

@@ -128,6 +128,8 @@ type DotenvPresence struct {
 	Bindings []Binding
 	Present  bool
 	Valid    bool
+	Value    integrations.Value
+	HasValue bool
 }
 
 // DotenvRoute is server-only lookup metadata derived from a curated manifest
@@ -148,7 +150,9 @@ func (r DotenvRoute) Label() string                 { return r.spec.Label() }
 func (r DotenvRoute) Reference() string             { return r.reference }
 func (r DotenvRoute) EnvironmentKey() string        { return r.environmentKey }
 func (r DotenvRoute) Secret() bool                  { return r.secret }
-func (r DotenvRoute) ValidValue(value []byte) bool  { return r.spec.ValidateSecretBytes(value) == nil }
+func (r DotenvRoute) ValidValue(value []byte) bool {
+	return r.spec.ValidateDotenvBytes(value) == nil && integrations.ValidateCoreDNSDotenvValue(r.fieldID, value) == nil
+}
 
 type Inspection struct {
 	SourceSHA256  string
@@ -177,6 +181,13 @@ func (i Inspection) WithDotenvPresence(presence []DotenvPresence) Inspection {
 			field.PresenceKnown = true
 			field.Present = item.Present
 			field.Configured = item.Present && item.Valid
+			if !field.Secret && item.Present && item.Valid && item.HasValue {
+				field.value = item.Value
+				field.hasValue = true
+			} else if !field.Configured {
+				field.value = integrations.Value{}
+				field.hasValue = false
+			}
 			if item.Present && !item.Valid {
 				i.Executable = false
 				if len(i.Issues) < i.maxIssues {

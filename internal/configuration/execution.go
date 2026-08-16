@@ -26,6 +26,7 @@ type ExecutionCertificate struct {
 	Account       string
 	CA            string
 	ChallengeName string
+	ChallengeKind string
 	ChallengeMode string
 }
 
@@ -180,6 +181,7 @@ func executionEvidenceDigest(evaluated *evaluation, intent ExecutionIntent) stri
 		writer.text(certificate.Account)
 		writer.text(certificate.CA)
 		writer.text(certificate.ChallengeName)
+		writer.text(certificate.ChallengeKind)
 		writer.text(certificate.ChallengeMode)
 	}
 	return hex.EncodeToString(digest.Sum(nil))
@@ -222,13 +224,17 @@ func executionIntent(evaluated *evaluation) (ExecutionIntent, error) {
 			return ExecutionIntent{}, fmt.Errorf("%w: incomplete native operation certificate scope", ErrInvalid)
 		}
 		challengeBinding := nativeconfig.Binding{ID: integrations.BindingChallenge, Value: challenge}
+		kind := "http-01"
 		mode := "listener"
-		if present[executionProjectionKey(integrations.FieldChallengeHTTPWebroot, []nativeconfig.Binding{challengeBinding})] {
+		if provider, ok := projectedString(values, integrations.FieldChallengeDNSProvider, challengeBinding); ok {
+			kind = "dns-01"
+			mode = provider
+		} else if present[executionProjectionKey(integrations.FieldChallengeHTTPWebroot, []nativeconfig.Binding{challengeBinding})] {
 			mode = "webroot"
 		}
 		certificates = append(certificates, ExecutionCertificate{
 			Name: name, Domains: domains, Account: account, CA: server,
-			ChallengeName: challenge, ChallengeMode: mode,
+			ChallengeName: challenge, ChallengeKind: kind, ChallengeMode: mode,
 		})
 	}
 	return ExecutionIntent{

@@ -5,19 +5,21 @@ files as authoritative. It does not keep a second desired-state document in
 SQLite and does not provide a raw YAML editor, arbitrary environment-variable
 editor, or generic command interface.
 
-The production `native-ca-certificate-http-v1` integration manifest projects
-the curated storage, account, accepted CA, certificate, renewal, and HTTP-01
-fields documented in `ca-certificate-http.md`. It can create a first native
+The production `native-core-dns-providers-v1` integration manifest projects
+the curated storage, account, accepted CA, certificate, renewal, HTTP-01, and
+Cloudflare, DigitalOcean, and DuckDNS DNS-01 fields documented in
+`ca-certificate-http.md` and `dns-providers.md`. It can create a first native
 configuration or edit an adopted compatible one. The browser still receives
 only logical field identifiers, bounded typed values, and server-derived
 entity bindings; it never receives a native selector or a generic YAML edit
 surface.
 
 The integration is intentionally narrower than the upstream schema. DNS
-providers, arbitrary servers, other CA endpoints, TLS-ALPN, HTTP memcached or
-S3, hooks, CSR, PFX, output controls, and unknown fields remain preserved but
-unsupported. Later integration manifests extend this same reviewed boundary;
-no feature-specific raw API substitutes for a curated manifest.
+providers other than those three, arbitrary servers, other CA endpoints,
+TLS-ALPN, HTTP memcached or S3, hooks, CSR, PFX, output controls, and unknown
+fields remain preserved but unsupported. Later integration manifests extend
+this same reviewed boundary; no feature-specific raw API substitutes for a
+curated manifest.
 
 ## Projection and preservation
 
@@ -94,12 +96,14 @@ present, replaced, removed, or absent state.
 
 ## Write-only secrets and dotenv files
 
-Every manifest-owned dotenv field is a secret string. Existing values are
-decoded only inside the service long enough to check their curated length and
-text contract. The browser receives presence and validity, never the value.
-The form offers keep, replace, or remove. A replacement is written even when
-it might equal the stored value, so preview behavior does not provide a secret
-equality oracle.
+Manifest-owned dotenv fields are either write-only credentials or public
+provider settings. Existing credential values are decoded only inside the
+service long enough to check their curated length and text contract. The
+browser receives presence and validity, never the secret value. Public timing,
+TTL, and endpoint settings are projected as bounded strings so the form can
+edit them. Secret controls offer keep, replace, or remove. A replacement is
+written even when it might equal the stored value, so preview behavior does
+not provide a secret equality oracle.
 
 Only exact uppercase keys declared by the selected integration manifest can
 be changed. Other syntactically valid keys are preserved and make the
@@ -137,10 +141,11 @@ native target, selector, environment key, or integration manifest.
 
 The resulting configuration must be complete under the curated manifest.
 Storage and every HTTP webroot directory must already exist and pass the
-no-follow ownership, mode, and access policy. A referenced dotenv file may be
-created only when the manifest owns its exact keys and its parent and absent
-target pass the same audit. AcmeMux does not create or repair directories as a
-side effect of configuration creation.
+no-follow ownership, mode, and access policy. A referenced provider dotenv
+file can be created in the same reviewed operation only when the manifest owns
+its exact keys and its parent and absent target pass the same audit. AcmeMux
+does not create or repair directories as a side effect of configuration
+creation.
 
 Preview is non-writing. Save reconstructs the exact candidate, rechecks the
 review token and missing targets, immediately reauthorizes the administrator,

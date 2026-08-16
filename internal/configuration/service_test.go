@@ -186,9 +186,13 @@ func (fake *fakeTransactions) Bootstrap(
 		return workspace.Selection{}, workspace.ErrSourceChanged
 	}
 	for _, replacement := range plan.Replacements {
-		if replacement.Role == workspace.RoleConfiguration {
+		switch replacement.Role {
+		case workspace.RoleConfiguration:
 			fake.configuration = slices.Clone(replacement.Content)
 			fake.configurationPath = replacement.Path
+		case workspace.RoleDotenv:
+			fake.dotenv = slices.Clone(replacement.Content)
+			fake.dotenvPath = replacement.Path
 		}
 	}
 	fake.workingDirectory = plan.Request.WorkingDirectory
@@ -848,6 +852,101 @@ func TestGTSCreationKeepsEABHMACPresenceOnlyUntilNativeSave(t *testing.T) {
 	}
 	if !bytes.Contains(transactions.configuration, []byte("hmacKey: "+task07EABCanary)) {
 		t.Fatalf("saved GTS YAML does not contain exact HMAC: %s", transactions.configuration)
+	}
+}
+
+func TestCoreDNSCreationAtomicallyCreatesRestrictiveCredentialSource(t *testing.T) {
+	directory := t.TempDir()
+	transactions := &fakeTransactions{workingDirectory: directory, selectionMissing: true, generation: 1}
+	service := newTestService(t, transactions, nil, 0x5c)
+	view, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := completeCreationChanges()
+	challenge := []nativeconfig.Binding{{ID: integrations.BindingChallenge, Value: "web"}}
+	for index := len(changes) - 1; index >= 0; index-- {
+		if changes[index].FieldID == integrations.FieldChallengeHTTPAddress || changes[index].FieldID == integrations.FieldChallengeHTTPDelay {
+			changes = slices.Delete(changes, index, index+1)
+		}
+	}
+	set := func(field integrations.FieldID, value integrations.Value) nativeconfig.Change {
+		return nativeconfig.Change{FieldID: field, Bindings: challenge, Operation: nativeconfig.OperationSet, Value: value}
+	}
+	const secret = "task09-cloudflare-secret-canary"
+	changes = append(changes,
+		set(integrations.FieldChallengeDNSProvider, integrations.StringValue("cloudflare")),
+		set(integrations.FieldChallengeDNSEnvFile, integrations.StringValue(".cloudflare.env")),
+		set(integrations.FieldChallengeDNSTimeout, integrations.IntegerValue(30)),
+		set(integrations.FieldChallengeDNSDisableAuthoritativeNameservers, integrations.BooleanValue(false)),
+		set(integrations.FieldChallengeDNSDisableRecursiveNameservers, integrations.BooleanValue(false)),
+		set(integrations.FieldChallengeDNSPropagationWait, integrations.StringValue("0s")),
+		set(integrations.FieldCloudflareDNSAPIToken, integrations.StringValue(secret)),
+		set(integrations.FieldCloudflareTTL, integrations.StringValue("300")),
+	)
+	request := CreationRequest{WorkingDirectory: directory, Changes: changes}
+	preview, err := service.PreviewCreation(context.Background(), view.Source.BaseRevisionToken, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.State != PreviewReviewRequired || preview.ResultingState != StateReady || !preview.Execution {
+		t.Fatalf("DNS creation preview = %#v", preview)
+	}
+	if strings.Contains(fmt.Sprintf("%#v", preview), secret) {
+		t.Fatal("DNS creation preview exposed the provider token")
+	}
+	created, err := service.Create(context.Background(), view.Source.BaseRevisionToken, request, preview.ReviewedPreviewToken, allowServiceCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.State != StateReady || !created.Execution || transactions.dotenvPath != filepath.Join(directory, ".cloudflare.env") ||
+		!bytes.Contains(transactions.dotenv, []byte("CLOUDFLARE_DNS_API_TOKEN='"+secret+"'")) ||
+		!bytes.Contains(transactions.dotenv, []byte("CLOUDFLARE_TTL='300'")) {
+		t.Fatalf("created DNS workspace = state:%s execution:%v path:%q dotenv:%q", created.State, created.Execution, transactions.dotenvPath, transactions.dotenv)
+	}
+}
+
+func TestCoreDNSCredentialRotationIsWriteOnlyAndAtomic(t *testing.T) {
+	directory := t.TempDir()
+	const oldToken = "task09-old-cloudflare-secret"
+	const newToken = "task09-new-cloudflare-secret"
+	transactions := &fakeTransactions{
+		workingDirectory:  directory,
+		configurationPath: filepath.Join(directory, ".lego.yml"),
+		dotenvPath:        filepath.Join(directory, ".cloudflare.env"),
+		configuration:     []byte(coreDNSServiceTestConfiguration),
+		dotenv:            []byte("CLOUDFLARE_DNS_API_TOKEN='" + oldToken + "'\nUNMANAGED='preserved'\n"),
+		generation:        1,
+	}
+	service := newTestService(t, transactions, nil, 0x2f)
+	view, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := []nativeconfig.Change{{
+		FieldID:   integrations.FieldCloudflareDNSAPIToken,
+		Bindings:  []nativeconfig.Binding{{ID: integrations.BindingChallenge, Value: "dns-home"}},
+		Operation: nativeconfig.OperationSet,
+		Value:     integrations.StringValue(newToken),
+	}}
+	preview, err := service.Preview(context.Background(), view.Source.BaseRevisionToken, changes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.State != PreviewReviewRequired || len(preview.Summary) != 1 || !preview.Summary[0].Secret ||
+		strings.Contains(fmt.Sprintf("%#v", preview), oldToken) || strings.Contains(fmt.Sprintf("%#v", preview), newToken) {
+		t.Fatalf("credential rotation preview = %#v", preview)
+	}
+	if _, err := service.Save(
+		context.Background(), view.Source.BaseRevisionToken, changes,
+		preview.ReviewedPreviewToken, allowServiceCommit,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(transactions.dotenv, []byte(oldToken)) ||
+		!bytes.Contains(transactions.dotenv, []byte("CLOUDFLARE_DNS_API_TOKEN='"+newToken+"'")) ||
+		!bytes.Contains(transactions.dotenv, []byte("UNMANAGED='preserved'")) {
+		t.Fatalf("rotated provider dotenv = %q", transactions.dotenv)
 	}
 }
 

@@ -199,13 +199,15 @@ does not disclose equality. Configuration diagnostics contain stable codes,
 logical identities, and bounded native locations, never source values or raw
 parser errors.
 
-Every manifest-owned dotenv key is classified as secret. Other keys remain
-byte-for-byte authoritative but block managed execution. Secret values exist
-transiently in bounded request and candidate memory and in native files; they
-are not written to SQLite, journal phases, review summaries, errors, URLs, or
-responses. Memory clearing is best effort. Host swap, crash dumps, filesystem
-snapshots, and another process sharing the AcmeMux service UID are within the
-trusted-host boundary and must be protected operationally.
+Every manifest-owned dotenv key is classified as either a write-only secret or
+a bounded public provider setting. Other keys remain byte-for-byte
+authoritative but block managed execution. Secret values exist transiently in
+bounded request and candidate memory and in native files; they are not written
+to SQLite, journal phases, review summaries, errors, URLs, or responses.
+Public TTL, timing, and endpoint values can be projected and reviewed. Memory
+clearing is best effort. Host swap, crash dumps, filesystem snapshots, and
+another process sharing the AcmeMux service UID are within the trusted-host
+boundary and must be protected operationally.
 
 Candidates are created beside their targets as service-owned, single-link
 regular files with mode `0600`, then synchronized and activated with

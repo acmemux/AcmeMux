@@ -149,7 +149,7 @@ func operationIntentFixture() configuration.ExecutionIntent {
 		RuntimeManifestID: compatibility.ManifestLegoV531,
 		Certificates: []configuration.ExecutionCertificate{{
 			Name: "gateway@example", Domains: []string{"gateway.home.example"}, Account: "admin@example.com",
-			CA: "letsencrypt", ChallengeName: "web", ChallengeMode: "listener",
+			CA: "letsencrypt", ChallengeName: "web", ChallengeKind: "http-01", ChallengeMode: "listener",
 		}},
 	}
 }

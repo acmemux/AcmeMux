@@ -122,7 +122,7 @@ func (e *Engine) projectAndClassify(document *yaml.Node) ([]ProjectedField, []Do
 	issues := make([]Issue, 0)
 	seenProjection := make(map[string]struct{})
 	projectionOverflow := false
-	unsupportedHTTPBindings := unsupportedHTTPChallengeBindings(document.Content[0])
+	unsupportedHTTPBindings := unsupportedChallengeBindings(document.Content[0], e.supportsCoreDNS())
 	unsupportedCertificates := unsupportedCertificateBindings(document.Content[0])
 	implicitUnsupportedChallenges := implicitUnsupportedCertificateChallenges(document.Content[0], unsupportedHTTPBindings)
 	implicitHTTPBindings := implicitHTTPChallengeBindings(document.Content[0])
@@ -182,6 +182,7 @@ func (e *Engine) projectAndClassify(document *yaml.Node) ([]ProjectedField, []Do
 				}
 			}
 			if len(dotenvMatches) > 0 {
+				dotenvMatches = filterProviderFields(document.Content[0], dotenvMatches)
 				for _, match := range dotenvMatches {
 					dotenvSpec := match.spec
 					bindings := orderedBindings(dotenvSpec, match.bindings)
@@ -256,6 +257,19 @@ func (e *Engine) projectAndClassify(document *yaml.Node) ([]ProjectedField, []Do
 			for _, binding := range bindings {
 				bindingValues[binding.ID] = binding.Value
 			}
+			challengeName := bindingValues[integrations.BindingChallenge]
+			challengeKind := nativeChallengeKind(document.Content[0], challengeName)
+			if challengeKind == "" && slices.Contains(implicitHTTPBindings, challengeName) {
+				challengeKind = "http"
+			}
+			if isHTTPChallengeSpec(spec) && challengeKind != "http" || isDNSChallengeSpec(spec) && challengeKind != "dns" {
+				continue
+			}
+			if providerCode, conditional := integrations.ProviderCodeForField(spec.ID()); conditional {
+				if dnsProviderForChallenge(document.Content[0], challengeName) != providerCode {
+					continue
+				}
+			}
 			if suppressUnsupportedHTTPProjection(spec, bindingValues, unsupportedHTTPBindings) ||
 				suppressUnsupportedCertificateProjection(spec, bindingValues, unsupportedCertificates) {
 				continue
@@ -309,7 +323,7 @@ func (e *Engine) projectAndClassify(document *yaml.Node) ([]ProjectedField, []Do
 // contract. Managed HTTP leaves under those containers remain preserved but
 // are not projected, so absent defaults cannot look editable or be submitted
 // by a full-form client during an unrelated change.
-func unsupportedHTTPChallengeBindings(root *yaml.Node) map[string]struct{} {
+func unsupportedChallengeBindings(root *yaml.Node, allowCoreDNS bool) map[string]struct{} {
 	result := make(map[string]struct{})
 	challenges, _, ok := mappingValue(root, "challenges")
 	if !ok || challenges.Kind != yaml.MappingNode {
@@ -321,8 +335,14 @@ func unsupportedHTTPChallengeBindings(root *yaml.Node) map[string]struct{} {
 			continue
 		}
 		unsupported := false
-		for _, key := range []string{"tls", "dns", "dnsPersist"} {
+		for _, key := range []string{"tls", "dnsPersist"} {
 			if _, _, present := mappingValue(challenge, key); present {
+				unsupported = true
+			}
+		}
+		if dns, _, present := mappingValue(challenge, "dns"); present {
+			provider, _, providerPresent := mappingValue(dns, "provider")
+			if !allowCoreDNS || !providerPresent || provider.Kind != yaml.ScalarNode || !integrations.SupportsCoreDNSProvider(provider.Value) {
 				unsupported = true
 			}
 		}
@@ -338,6 +358,36 @@ func unsupportedHTTPChallengeBindings(root *yaml.Node) map[string]struct{} {
 		}
 	}
 	return result
+}
+
+func dnsProviderForChallenge(root *yaml.Node, challengeName string) string {
+	challenges, _, ok := mappingValue(root, "challenges")
+	if !ok || challenges.Kind != yaml.MappingNode {
+		return ""
+	}
+	challenge, _, ok := mappingValue(challenges, challengeName)
+	if !ok || challenge.Kind != yaml.MappingNode {
+		return ""
+	}
+	dns, _, ok := mappingValue(challenge, "dns")
+	if !ok || dns.Kind != yaml.MappingNode {
+		return ""
+	}
+	provider, _, ok := mappingValue(dns, "provider")
+	if !ok || provider.Kind != yaml.ScalarNode || provider.Tag != "!!str" {
+		return ""
+	}
+	return provider.Value
+}
+
+func filterProviderFields(root *yaml.Node, matches []fieldMatch) []fieldMatch {
+	return slices.DeleteFunc(matches, func(match fieldMatch) bool {
+		providerCode, conditional := integrations.ProviderCodeForField(match.spec.ID())
+		if !conditional {
+			return false
+		}
+		return dnsProviderForChallenge(root, match.bindings[integrations.BindingChallenge]) != providerCode
+	})
 }
 
 func suppressUnsupportedHTTPProjection(
@@ -365,6 +415,36 @@ func isHTTPChallengeSpec(spec integrations.FieldSpec) bool {
 	third, thirdOK := selector[2].Key()
 	return firstOK && first == "challenges" && bindingOK && binding == integrations.BindingChallenge &&
 		thirdOK && third == "http"
+}
+
+func isDNSChallengeSpec(spec integrations.FieldSpec) bool {
+	selector := spec.Selector()
+	if len(selector) < 3 {
+		return false
+	}
+	first, firstOK := selector[0].Key()
+	binding, bindingOK := selector[1].Binding()
+	third, thirdOK := selector[2].Key()
+	return firstOK && first == "challenges" && bindingOK && binding == integrations.BindingChallenge &&
+		thirdOK && third == "dns"
+}
+
+func nativeChallengeKind(root *yaml.Node, challengeName string) string {
+	challenges, _, ok := mappingValue(root, "challenges")
+	if !ok || challenges.Kind != yaml.MappingNode {
+		return ""
+	}
+	challenge, _, ok := mappingValue(challenges, challengeName)
+	if !ok || challenge.Kind != yaml.MappingNode {
+		return ""
+	}
+	if _, _, ok := mappingValue(challenge, "http"); ok {
+		return "http"
+	}
+	if _, _, ok := mappingValue(challenge, "dns"); ok {
+		return "dns"
+	}
+	return ""
 }
 
 func implicitHTTPChallengeBindings(root *yaml.Node) []string {
