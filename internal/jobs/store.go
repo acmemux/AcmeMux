@@ -84,18 +84,26 @@ INSERT INTO operation_latest (
     singleton_id, operation_id, reviewed_evidence_sha256, kind, state, phase, requested_at_utc,
     started_at_utc, finished_at_utc, updated_at_utc, reason_code,
     may_have_changed, inventory_state, inventory_code, redacted_output,
-    output_truncated, inventory_certificate_count, request_kind
-) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, '', 0, ?, '', '', 0, NULL, ?)`,
+    output_truncated, inventory_certificate_count, request_kind,
+    report_runtime_identity, report_runtime_manifest_id, report_configuration_path, report_storage_path
+) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, '', 0, ?, '', '', 0, NULL, ?, ?, ?, ?, ?)`,
 		latestOperationID, id, request.ReviewedEvidenceSHA256, KindManual, StateQueued, PhaseQueued, timestamp,
-		timestamp, InventoryPending, kind,
+		timestamp, InventoryPending, kind, request.Context.RuntimeIdentity, request.Context.RuntimeManifestID,
+		request.Context.ConfigurationPath, request.Context.StoragePath,
 	); err != nil {
 		return Operation{}, fmt.Errorf("persist queued operation: %w", err)
 	}
 	for ordinal, item := range request.Items {
+		detail := RequestItem{}
+		if len(request.Details) != 0 {
+			detail = request.Details[ordinal]
+		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO operation_requested_item (
-    operation_id, item_ordinal, item_name
-) VALUES (?, ?, ?)`, id, ordinal, item); err != nil {
+    operation_id, item_ordinal, item_name, report_account, report_ca,
+    report_challenge_kind, report_challenge_mode
+) VALUES (?, ?, ?, ?, ?, ?, ?)`, id, ordinal, item, detail.Account, detail.CA,
+			detail.ChallengeKind, detail.ChallengeMode); err != nil {
 			return Operation{}, fmt.Errorf("persist reviewed operation item: %w", err)
 		}
 	}
@@ -282,7 +290,7 @@ WHERE singleton_id = ? AND operation_id = ?`, latestOperationID, id).Scan(&curre
 	if err != nil {
 		return Operation{}, fmt.Errorf("inspect running operation: %w", err)
 	}
-	requested, err := loadRequestedItems(ctx, tx, id)
+	requested, _, err := loadRequestedItems(ctx, tx, id)
 	if err != nil {
 		return Operation{}, err
 	}
@@ -370,7 +378,7 @@ WHERE singleton_id = ?`, latestOperationID).Scan(&id, &state)
 	if err != nil {
 		return Operation{}, false, fmt.Errorf("inspect interrupted operation: %w", err)
 	}
-	requested, err := loadRequestedItems(ctx, tx, id)
+	requested, _, err := loadRequestedItems(ctx, tx, id)
 	if err != nil {
 		return Operation{}, false, err
 	}
@@ -496,6 +504,8 @@ func loadOperation(ctx context.Context, tx *sql.Tx) (Operation, error) {
 		&persisted.updatedAt, &persisted.code, &persisted.mayHaveChanged,
 		&persisted.inventoryState, &persisted.inventoryCode, &persisted.output,
 		&persisted.outputTruncated, &persisted.certificateCount,
+		&persisted.runtimeIdentity, &persisted.runtimeManifestID,
+		&persisted.configurationPath, &persisted.storagePath,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Operation{}, ErrNotFound
@@ -503,7 +513,7 @@ func loadOperation(ctx context.Context, tx *sql.Tx) (Operation, error) {
 	if err != nil {
 		return Operation{}, fmt.Errorf("load latest operation: %w", err)
 	}
-	persisted.requestItems, err = loadRequestedItems(ctx, tx, persisted.id)
+	persisted.requestItems, persisted.requestDetails, err = loadRequestedItems(ctx, tx, persisted.id)
 	if err != nil {
 		return Operation{}, err
 	}
@@ -535,28 +545,35 @@ ORDER BY item_ordinal`, persisted.id)
 	return operation, nil
 }
 
-func loadRequestedItems(ctx context.Context, tx *sql.Tx, id string) ([]string, error) {
+func loadRequestedItems(ctx context.Context, tx *sql.Tx, id string) ([]string, []RequestItem, error) {
 	rows, err := tx.QueryContext(ctx, `
-SELECT item_name
+SELECT item_name, report_account, report_ca, report_challenge_kind, report_challenge_mode
 FROM operation_requested_item
 WHERE operation_id = ?
 ORDER BY item_ordinal`, id)
 	if err != nil {
-		return nil, fmt.Errorf("load reviewed operation items: %w", err)
+		return nil, nil, fmt.Errorf("load reviewed operation items: %w", err)
 	}
 	defer rows.Close()
 	var items []string
+	var details []RequestItem
+	hasDetails := false
 	for rows.Next() {
-		var item string
-		if err := rows.Scan(&item); err != nil {
-			return nil, fmt.Errorf("read reviewed operation item: %w", err)
+		var detail RequestItem
+		if err := rows.Scan(&detail.Name, &detail.Account, &detail.CA, &detail.ChallengeKind, &detail.ChallengeMode); err != nil {
+			return nil, nil, fmt.Errorf("read reviewed operation item: %w", err)
 		}
-		items = append(items, item)
+		items = append(items, detail.Name)
+		details = append(details, detail)
+		hasDetails = hasDetails || detail.Account != "" || detail.CA != "" || detail.ChallengeKind != "" || detail.ChallengeMode != ""
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read reviewed operation items: %w", err)
+		return nil, nil, fmt.Errorf("read reviewed operation items: %w", err)
 	}
-	return items, nil
+	if !hasDetails {
+		details = nil
+	}
+	return items, details, nil
 }
 
 func validateResultScope(requested []string, results []ItemResult) error {
@@ -590,6 +607,11 @@ type persistedOperation struct {
 	certificateCount       sql.NullInt64
 	items                  []ItemResult
 	requestItems           []string
+	requestDetails         []RequestItem
+	runtimeIdentity        string
+	runtimeManifestID      string
+	configurationPath      string
+	storagePath            string
 }
 
 func (persisted persistedOperation) operation() (Operation, error) {
@@ -634,6 +656,11 @@ func (persisted persistedOperation) operation() (Operation, error) {
 		Request: Request{
 			ReviewedEvidenceSHA256: persisted.reviewedEvidenceSHA256,
 			Items:                  append([]string(nil), persisted.requestItems...),
+			Details:                append([]RequestItem(nil), persisted.requestDetails...),
+			Context: RequestContext{
+				RuntimeIdentity: persisted.runtimeIdentity, RuntimeManifestID: persisted.runtimeManifestID,
+				ConfigurationPath: persisted.configurationPath, StoragePath: persisted.storagePath,
+			},
 		},
 	}
 	if err := validateOperation(operation); err != nil {
@@ -767,6 +794,10 @@ SELECT
     inventory_code,
     redacted_output,
     output_truncated,
-    inventory_certificate_count
+    inventory_certificate_count,
+    report_runtime_identity,
+    report_runtime_manifest_id,
+    report_configuration_path,
+    report_storage_path
 FROM operation_latest
 WHERE singleton_id = ?`

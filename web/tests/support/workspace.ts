@@ -86,6 +86,7 @@ type Certificate = {
   dnsNames: string[];
   issuer: string;
   expiresAt: string;
+  health: "healthy" | "expiring" | "expired";
   artifact: {
     nativePath: string;
     uid: number;
@@ -113,6 +114,7 @@ type WorkspaceSnapshot =
         | "inventory_unavailable";
       workspace?: WorkspaceEvidence;
       inventory: Certificate[];
+      inventoryObservedAt: string | null;
       diagnostics: Diagnostic[];
     };
 
@@ -215,6 +217,7 @@ export const workspaceCertificate: Certificate = {
   dnsNames: ["gateway.home.example", "home.example"],
   issuer: "Let's Encrypt Authority X3",
   expiresAt: "2030-03-31T12:30:00Z",
+  health: "healthy",
   artifact: {
     nativePath: "/srv/lego/data/certificates/gateway.home.example.crt",
     ...metadata,
@@ -236,6 +239,7 @@ export const readyWorkspace = {
   state: "ready",
   workspace: workspaceEvidence,
   inventory: [workspaceCertificate],
+  inventoryObservedAt: "2030-01-01T00:00:00Z",
   diagnostics: [],
 } as const satisfies WorkspaceSnapshot;
 

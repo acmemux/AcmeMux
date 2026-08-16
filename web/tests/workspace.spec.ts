@@ -85,7 +85,14 @@ test("shows bounded certificate inventory from native evidence", async ({
     page.getByText(workspaceCertificate.artifact.nativePath),
   ).toBeVisible();
   await expect(page.getByText("uid 991 / gid 991 / 0640")).toBeVisible();
-  await expect(page.getByText(/Mar 31, 2030.*UTC/)).toBeVisible();
+  await expect(page.getByText("healthy", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Exact UTC: Mar 31, 2030.*UTC/)).toBeVisible();
+  await expect(
+    page.getByText(/Health observed from the service host clock/),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/not a lego renewal-due prediction/),
+  ).toBeVisible();
   await expect(page.getByText(/BEGIN CERTIFICATE/)).toHaveCount(0);
   await expect(page.getByText(/PRIVATE KEY/)).toHaveCount(0);
 });

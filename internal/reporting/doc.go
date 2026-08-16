@@ -1,3 +1,3 @@
-// Package reporting presents native inventory and the bounded latest result.
-// Reporting behavior is introduced by its dedicated delivery task.
+// Package reporting derives certificate health and safe presentation text from
+// current native inventory and the bounded latest durable operation.
 package reporting

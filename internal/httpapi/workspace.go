@@ -16,6 +16,7 @@ import (
 
 	"github.com/sgurden-certleap/AcmeMux/internal/identity"
 	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
+	"github.com/sgurden-certleap/AcmeMux/internal/reporting"
 	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
@@ -110,10 +111,11 @@ type workspaceAuthorization struct {
 }
 
 type workspaceSnapshot struct {
-	State       string                 `json:"state"`
-	Workspace   *workspaceEvidence     `json:"workspace,omitempty"`
-	Inventory   []workspaceCertificate `json:"inventory"`
-	Diagnostics []workspaceDiagnostic  `json:"diagnostics"`
+	State               string                 `json:"state"`
+	Workspace           *workspaceEvidence     `json:"workspace,omitempty"`
+	Inventory           []workspaceCertificate `json:"inventory"`
+	InventoryObservedAt *string                `json:"inventoryObservedAt"`
+	Diagnostics         []workspaceDiagnostic  `json:"diagnostics"`
 }
 
 type workspaceCandidate struct {
@@ -191,6 +193,7 @@ type workspaceCertificate struct {
 	DNSNames  []string                     `json:"dnsNames"`
 	Issuer    string                       `json:"issuer"`
 	ExpiresAt string                       `json:"expiresAt"`
+	Health    string                       `json:"health"`
 	Artifact  workspaceCertificateArtifact `json:"artifact"`
 }
 
@@ -300,12 +303,19 @@ func (endpoints *workspaceEndpoints) getWorkspace(response http.ResponseWriter, 
 		return
 	}
 	current = confirmed
+	projection, err := reporting.ProjectInventory(certificates, endpoints.now())
+	if err != nil {
+		writeWorkspaceUnavailable(response)
+		return
+	}
+	observedAt := projection.ObservedAt.Format(time.RFC3339Nano)
 	evidence := presentWorkspaceEvidence(current)
 	writeJSON(response, http.StatusOK, workspaceSnapshot{
-		State:       "ready",
-		Workspace:   &evidence,
-		Inventory:   presentWorkspaceCertificates(certificates),
-		Diagnostics: presentWorkspaceDiagnostics(current.Diagnostics),
+		State:               "ready",
+		Workspace:           &evidence,
+		Inventory:           presentWorkspaceCertificates(projection.Certificates),
+		InventoryObservedAt: &observedAt,
+		Diagnostics:         presentWorkspaceDiagnostics(current.Diagnostics),
 	})
 }
 
@@ -502,12 +512,19 @@ func (endpoints *workspaceEndpoints) adoptWorkspace(response http.ResponseWriter
 		writeWorkspaceUnavailable(response)
 		return
 	}
+	projection, err := reporting.ProjectInventory(certificates, endpoints.now())
+	if err != nil {
+		writeWorkspaceUnavailable(response)
+		return
+	}
+	observedAt := projection.ObservedAt.Format(time.RFC3339Nano)
 	evidence := presentWorkspaceEvidence(review)
 	writeJSON(response, http.StatusOK, workspaceSnapshot{
-		State:       "ready",
-		Workspace:   &evidence,
-		Inventory:   presentWorkspaceCertificates(certificates),
-		Diagnostics: presentWorkspaceDiagnostics(review.Diagnostics),
+		State:               "ready",
+		Workspace:           &evidence,
+		Inventory:           presentWorkspaceCertificates(projection.Certificates),
+		InventoryObservedAt: &observedAt,
+		Diagnostics:         presentWorkspaceDiagnostics(review.Diagnostics),
 	})
 }
 
@@ -927,7 +944,7 @@ func changedWorkspaceState(review workspace.Review) string {
 	return state
 }
 
-func presentWorkspaceCertificates(certificates []inventory.Certificate) []workspaceCertificate {
+func presentWorkspaceCertificates(certificates []reporting.Certificate) []workspaceCertificate {
 	presented := make([]workspaceCertificate, 0, len(certificates))
 	for _, certificate := range certificates {
 		presented = append(presented, workspaceCertificate{
@@ -935,6 +952,7 @@ func presentWorkspaceCertificates(certificates []inventory.Certificate) []worksp
 			DNSNames:  append([]string{}, certificate.DNSNames...),
 			Issuer:    certificate.Issuer,
 			ExpiresAt: certificate.ExpiresAt.UTC().Format(time.RFC3339Nano),
+			Health:    string(certificate.Health),
 			Artifact: workspaceCertificateArtifact{
 				NativePath: certificate.NativePath,
 				UID:        certificate.Artifact.UID,

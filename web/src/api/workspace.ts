@@ -146,6 +146,7 @@ export type CertificateInventoryItem = {
   dnsNames: string[];
   issuer: string;
   expiresAt: string;
+  health: "healthy" | "expiring" | "expired";
   artifact: {
     nativePath: string;
     uid: number;
@@ -172,20 +173,24 @@ export type WorkspaceAdoptedState =
 export type WorkspaceSnapshot =
   | { state: "unadopted" }
   | {
-      state:
-        | "ready"
-        | "read_only"
-        | "unsafe"
-        | "incompatible"
-        | "inventory_unavailable";
+      state: "ready";
       workspace: WorkspaceEvidence;
       inventory: CertificateInventoryItem[];
+      inventoryObservedAt?: string;
+      diagnostics: WorkspaceDiagnostic[];
+    }
+  | {
+      state: "read_only" | "unsafe" | "incompatible" | "inventory_unavailable";
+      workspace: WorkspaceEvidence;
+      inventory: CertificateInventoryItem[];
+      inventoryObservedAt?: null;
       diagnostics: WorkspaceDiagnostic[];
     }
   | {
       state: "changed" | "missing";
       workspace: WorkspaceEvidence;
       inventory: CertificateInventoryItem[];
+      inventoryObservedAt?: null;
       diagnostics: WorkspaceDiagnostic[];
     };
 
@@ -275,6 +280,11 @@ const adoptedStates = new Set<WorkspaceAdoptedState>([
   "unsafe",
   "incompatible",
   "inventory_unavailable",
+]);
+const certificateHealthStates = new Set<CertificateInventoryItem["health"]>([
+  "healthy",
+  "expiring",
+  "expired",
 ]);
 const diagnosticCodes = new Set<WorkspaceDiagnosticCode>([
   "invalid_policy",
@@ -1460,6 +1470,7 @@ function decodeCertificate(value: unknown): CertificateInventoryItem {
       "dnsNames",
       "issuer",
       "expiresAt",
+      "health",
       "artifact",
     ]) ||
     !boundedDisplayText(value.name, 255) ||
@@ -1468,7 +1479,10 @@ function decodeCertificate(value: unknown): CertificateInventoryItem {
     !value.dnsNames.every((name) => boundedDisplayText(name, 253)) ||
     new Set(value.dnsNames).size !== value.dnsNames.length ||
     !boundedDisplayText(value.issuer, 4096) ||
-    !validTimestamp(value.expiresAt)
+    !validTimestamp(value.expiresAt) ||
+    !certificateHealthStates.has(
+      value.health as CertificateInventoryItem["health"],
+    )
   ) {
     invalidResponse();
   }
@@ -1477,6 +1491,7 @@ function decodeCertificate(value: unknown): CertificateInventoryItem {
     dnsNames: [...value.dnsNames] as string[],
     issuer: value.issuer,
     expiresAt: value.expiresAt,
+    health: value.health as CertificateInventoryItem["health"],
     artifact: decodeArtifact(value.artifact),
   };
 }
@@ -1540,7 +1555,11 @@ function decodeSnapshot(value: unknown): WorkspaceSnapshot {
   }
   const state = value.state as WorkspaceAdoptedState;
   if (
-    !hasExactKeys(value, ["state", "workspace", "inventory", "diagnostics"])
+    !hasExactKeys(
+      value,
+      ["state", "workspace", "inventory", "diagnostics"],
+      ["inventoryObservedAt"],
+    )
   ) {
     invalidResponse();
   }
@@ -1549,7 +1568,15 @@ function decodeSnapshot(value: unknown): WorkspaceSnapshot {
     invalidResponse();
   }
   const inventory = decodeInventory(value.inventory);
-  if (state !== "ready" && inventory.length !== 0) {
+  if (
+    (state === "ready" &&
+      value.inventoryObservedAt !== undefined &&
+      !validTimestamp(value.inventoryObservedAt)) ||
+    (state !== "ready" &&
+      value.inventoryObservedAt !== undefined &&
+      value.inventoryObservedAt !== null) ||
+    (state !== "ready" && inventory.length !== 0)
+  ) {
     invalidResponse();
   }
   const workspace = decodeWorkspaceEvidence(value.workspace);
@@ -1574,7 +1601,26 @@ function decodeSnapshot(value: unknown): WorkspaceSnapshot {
   if (state === "ready" && !inventoryMatchesWorkspace(inventory, workspace)) {
     invalidResponse();
   }
-  return { state, workspace, inventory, diagnostics };
+  if (state === "ready") {
+    return {
+      state,
+      workspace,
+      inventory,
+      ...(value.inventoryObservedAt === undefined
+        ? {}
+        : { inventoryObservedAt: value.inventoryObservedAt as string }),
+      diagnostics,
+    };
+  }
+  return {
+    state,
+    workspace,
+    inventory,
+    ...(value.inventoryObservedAt === undefined
+      ? {}
+      : { inventoryObservedAt: null }),
+    diagnostics,
+  };
 }
 
 function decodeCandidate(

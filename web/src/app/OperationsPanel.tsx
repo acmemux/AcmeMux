@@ -529,7 +529,7 @@ function stateLabel(state: TerminalOperationResult["state"]): string {
     case "incompatible":
       return "Incompatible";
     case "ambiguous":
-      return "Ambiguous";
+      return "Outcome ambiguous";
   }
 }
 
@@ -838,6 +838,43 @@ function LatestResult({ result }: { result: TerminalOperationResult }) {
         </div>
       </dl>
 
+      <FeedbackPanel tone={stateTone(result.state)} title={result.summary}>
+        <p>
+          <strong>Safe next action:</strong> {result.nextAction}
+        </p>
+      </FeedbackPanel>
+
+      <details className="am-disclosure am-operation-evidence">
+        <summary>Show runtime and native configuration identity</summary>
+        {result.runtime === null ? (
+          <p>This retained result predates bounded reporting identity.</p>
+        ) : (
+          <dl className="am-operation-result__facts">
+            <div>
+              <dt>Upstream lego identity</dt>
+              <dd>{result.runtime.identity}</dd>
+            </div>
+            <div>
+              <dt>Compatibility manifest</dt>
+              <dd>{result.runtime.manifestId}</dd>
+            </div>
+            <div>
+              <dt>Native configuration</dt>
+              <dd>{result.configurationPath}</dd>
+            </div>
+            <div>
+              <dt>Native storage</dt>
+              <dd>{result.storagePath}</dd>
+            </div>
+          </dl>
+        )}
+        <p>
+          Certificate, chain, account, and private-key files remain owned by
+          upstream lego in native storage. AcmeMux does not back up or deploy
+          them.
+        </p>
+      </details>
+
       <FeedbackPanel
         tone={result.inventory.state === "refreshed" ? "success" : "warning"}
         title={
@@ -886,6 +923,9 @@ function LatestResult({ result }: { result: TerminalOperationResult }) {
                 <th scope="col">Certificate</th>
                 <th scope="col">State</th>
                 <th scope="col">Reason</th>
+                <th scope="col">Account</th>
+                <th scope="col">CA</th>
+                <th scope="col">Challenge / provider</th>
               </tr>
             </thead>
             <tbody>
@@ -898,6 +938,13 @@ function LatestResult({ result }: { result: TerminalOperationResult }) {
                     </StatusBadge>
                   </td>
                   <td>{words(certificate.reasonCode)}</td>
+                  <td>{certificate.account ?? "Not retained"}</td>
+                  <td>{certificate.ca ?? "Not retained"}</td>
+                  <td>
+                    {certificate.challenge === null
+                      ? "Not retained"
+                      : `${certificate.challenge.kind} / ${certificate.challenge.mode}`}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -15,6 +15,7 @@ import (
 
 	"github.com/sgurden-certleap/AcmeMux/internal/identity"
 	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
+	"github.com/sgurden-certleap/AcmeMux/internal/reporting"
 	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
 	"github.com/sgurden-certleap/AcmeMux/internal/state"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
@@ -278,7 +279,8 @@ func TestWorkspaceGetReadyInventoriesExactStorageAndPreservesNotice(t *testing.T
 	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.State != "ready" || len(snapshot.Inventory) != 1 || len(snapshot.Diagnostics) != 1 {
+	if snapshot.State != "ready" || len(snapshot.Inventory) != 1 || len(snapshot.Diagnostics) != 1 ||
+		snapshot.InventoryObservedAt == nil || snapshot.Inventory[0].Health != "healthy" {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
 	if len(harness.inventory.paths) != 1 || harness.inventory.paths[0] != review.Storage.Path {
@@ -290,13 +292,17 @@ func TestWorkspaceGetReadyInventoriesExactStorageAndPreservesNotice(t *testing.T
 }
 
 func TestWorkspaceCertificatePresentationUsesEmptyDNSArray(t *testing.T) {
-	presented := presentWorkspaceCertificates([]inventory.Certificate{{
+	projection, err := reporting.ProjectInventory([]inventory.Certificate{{
 		Name:       "192.0.2.10",
 		DNSNames:   nil,
 		Issuer:     "Home CA",
 		ExpiresAt:  time.Date(2032, 1, 2, 3, 4, 5, 0, time.UTC),
 		NativePath: "/srv/lego/.lego/certificates/192.0.2.10.crt",
-	}})
+	}}, time.Date(2031, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	presented := presentWorkspaceCertificates(projection.Certificates)
 	encoded, err := json.Marshal(presented)
 	if err != nil {
 		t.Fatal(err)

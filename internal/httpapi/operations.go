@@ -19,6 +19,7 @@ import (
 	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
 	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
 	"github.com/sgurden-certleap/AcmeMux/internal/operation"
+	"github.com/sgurden-certleap/AcmeMux/internal/reporting"
 	"github.com/sgurden-certleap/AcmeMux/internal/scheduler"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
@@ -170,17 +171,22 @@ type latestOperationResponse struct {
 }
 
 type terminalOperationResult struct {
-	ID             string                       `json:"id"`
-	Kind           string                       `json:"kind"`
-	State          string                       `json:"state"`
-	ReasonCode     string                       `json:"reasonCode"`
-	RequestedAt    string                       `json:"requestedAt"`
-	StartedAt      *string                      `json:"startedAt"`
-	FinishedAt     string                       `json:"finishedAt"`
-	MayHaveChanged bool                         `json:"mayHaveChanged"`
-	Output         operationOutput              `json:"output"`
-	Certificates   []operationCertificateResult `json:"certificates"`
-	Inventory      operationInventoryResult     `json:"inventory"`
+	ID                string                       `json:"id"`
+	Kind              string                       `json:"kind"`
+	State             string                       `json:"state"`
+	ReasonCode        string                       `json:"reasonCode"`
+	RequestedAt       string                       `json:"requestedAt"`
+	StartedAt         *string                      `json:"startedAt"`
+	FinishedAt        string                       `json:"finishedAt"`
+	MayHaveChanged    bool                         `json:"mayHaveChanged"`
+	Output            operationOutput              `json:"output"`
+	Certificates      []operationCertificateResult `json:"certificates"`
+	Inventory         operationInventoryResult     `json:"inventory"`
+	Summary           string                       `json:"summary"`
+	NextAction        string                       `json:"nextAction"`
+	Runtime           *operationRuntime            `json:"runtime"`
+	ConfigurationPath *string                      `json:"configurationPath"`
+	StoragePath       *string                      `json:"storagePath"`
 }
 
 type operationOutput struct {
@@ -189,9 +195,17 @@ type operationOutput struct {
 }
 
 type operationCertificateResult struct {
-	Name       string `json:"name"`
-	State      string `json:"state"`
-	ReasonCode string `json:"reasonCode"`
+	Name       string                    `json:"name"`
+	State      string                    `json:"state"`
+	ReasonCode string                    `json:"reasonCode"`
+	Account    *string                   `json:"account"`
+	CA         *string                   `json:"ca"`
+	Challenge  *operationReportChallenge `json:"challenge"`
+}
+
+type operationReportChallenge struct {
+	Kind string `json:"kind"`
+	Mode string `json:"mode"`
 }
 
 type operationInventoryResult struct {
@@ -536,16 +550,35 @@ func presentTerminalOperation(value jobs.Operation) (terminalOperationResult, bo
 		}) >= 0 {
 		return terminalOperationResult{}, false
 	}
+	presentation, ok := reporting.PresentState(value.State)
+	if !ok {
+		return terminalOperationResult{}, false
+	}
 	result := terminalOperationResult{
 		ID: value.ID, Kind: string(value.Kind), State: string(value.State), ReasonCode: value.Code,
 		RequestedAt: value.RequestedAt.UTC().Format(time.RFC3339Nano),
 		FinishedAt:  value.FinishedAt.UTC().Format(time.RFC3339Nano), MayHaveChanged: value.MayHaveChanged,
-		Output:       operationOutput{Text: value.Output, Truncated: value.OutputTruncated},
+		Output:       operationOutput{Text: reporting.RenderOutput(value.Output), Truncated: value.OutputTruncated},
 		Certificates: make([]operationCertificateResult, 0, len(value.Items)),
+		Summary:      presentation.Summary, NextAction: presentation.NextAction,
+	}
+	if value.Request.Context != (jobs.RequestContext{}) {
+		context := value.Request.Context
+		if (!operationReleasePattern.MatchString(context.RuntimeIdentity) && !operationRevisionPattern.MatchString(context.RuntimeIdentity)) ||
+			!operationManifestPattern.MatchString(context.RuntimeManifestID) || !validWorkspacePath(context.ConfigurationPath) || !validWorkspacePath(context.StoragePath) {
+			return terminalOperationResult{}, false
+		}
+		result.Runtime = &operationRuntime{Identity: context.RuntimeIdentity, ManifestID: context.RuntimeManifestID}
+		result.ConfigurationPath = &context.ConfigurationPath
+		result.StoragePath = &context.StoragePath
 	}
 	if !value.StartedAt.IsZero() {
 		formatted := value.StartedAt.UTC().Format(time.RFC3339Nano)
 		result.StartedAt = &formatted
+	}
+	details := make(map[string]jobs.RequestItem, len(value.Request.Details))
+	for _, detail := range value.Request.Details {
+		details[detail.Name] = detail
 	}
 	for _, item := range value.Items {
 		if !operationIdentifierPattern.MatchString(item.Name) || !operationReasonPattern.MatchString(item.Code) ||
@@ -553,9 +586,19 @@ func presentTerminalOperation(value jobs.Operation) (terminalOperationResult, bo
 				item.State != jobs.ItemNotAttempted && item.State != jobs.ItemAmbiguous) {
 			return terminalOperationResult{}, false
 		}
-		result.Certificates = append(result.Certificates, operationCertificateResult{
+		presented := operationCertificateResult{
 			Name: item.Name, State: string(item.State), ReasonCode: item.Code,
-		})
+		}
+		if detail, exists := details[item.Name]; exists {
+			if !operationIdentifierPattern.MatchString(detail.Account) || !validOperationText(detail.CA, 255, false) ||
+				!validOperationChallenge(detail.ChallengeKind, detail.ChallengeMode) {
+				return terminalOperationResult{}, false
+			}
+			presented.Account = &detail.Account
+			presented.CA = &detail.CA
+			presented.Challenge = &operationReportChallenge{Kind: detail.ChallengeKind, Mode: detail.ChallengeMode}
+		}
+		result.Certificates = append(result.Certificates, presented)
 	}
 	switch value.Inventory.State {
 	case jobs.InventoryRefreshed:

@@ -239,6 +239,22 @@ test.describe("application accessibility", () => {
     await expectNoWcagViolations(page);
   });
 
+  test("certificate health and attention inventory has no WCAG A or AA violations", async ({
+    page,
+  }) => {
+    await page.setViewportSize(desktopViewport);
+    await mockRuntime(page, { initial: supportedRuntime });
+    await mockWorkspace(page, { initial: readyWorkspace });
+    await mockConfiguration(page);
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Certificate evidence" }),
+    ).toBeVisible();
+    await expect(page.getByText("healthy", { exact: true })).toBeVisible();
+    await expectNoWcagViolations(page);
+  });
+
   for (const [name, configuration] of [
     ["creation", creationRequiredConfiguration],
     ["unsupported", unsupportedConfiguration],

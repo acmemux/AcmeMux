@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -28,6 +29,27 @@ const (
 type Request struct {
 	ReviewedEvidenceSHA256 string
 	Items                  []string
+	Context                RequestContext
+	Details                []RequestItem
+}
+
+// RequestContext is the bounded secret-free runtime and native path identity
+// retained only with the latest operation report. Empty is accepted solely for
+// operations created before the reporting migration.
+type RequestContext struct {
+	RuntimeIdentity   string
+	RuntimeManifestID string
+	ConfigurationPath string
+	StoragePath       string
+}
+
+// RequestItem records the selected native integration without credentials.
+type RequestItem struct {
+	Name          string
+	Account       string
+	CA            string
+	ChallengeKind string
+	ChallengeMode string
 }
 
 // Kind identifies which trusted product path accepted a fixed native
@@ -171,7 +193,33 @@ func validateRequest(request Request) error {
 		}
 		seen[item] = struct{}{}
 	}
+	legacy := request.Context == (RequestContext{}) && len(request.Details) == 0
+	if legacy {
+		return nil
+	}
+	if !validRequestText(request.Context.RuntimeIdentity, 64) ||
+		!validRequestText(request.Context.RuntimeManifestID, 128) ||
+		!validRequestPath(request.Context.ConfigurationPath) ||
+		!validRequestPath(request.Context.StoragePath) || len(request.Details) != len(request.Items) {
+		return errors.New("reviewed operation context is invalid")
+	}
+	for index, detail := range request.Details {
+		if detail.Name != request.Items[index] || !validRequestText(detail.Account, 64) ||
+			!validRequestText(detail.CA, 255) || !validRequestText(detail.ChallengeKind, 32) ||
+			!validRequestText(detail.ChallengeMode, 64) {
+			return errors.New("reviewed operation integration is invalid")
+		}
+	}
 	return nil
+}
+
+func validRequestText(value string, maximum int) bool {
+	return value != "" && len(value) <= maximum && utf8.ValidString(value) &&
+		strings.IndexFunc(value, unicode.IsControl) < 0
+}
+
+func validRequestPath(value string) bool {
+	return validRequestText(value, 4095) && filepath.IsAbs(value) && filepath.Clean(value) == value
 }
 
 func (state State) active() bool {
@@ -351,6 +399,7 @@ func cloneInventory(value InventoryResult) InventoryResult {
 
 func cloneRequest(value Request) Request {
 	value.Items = append([]string(nil), value.Items...)
+	value.Details = append([]RequestItem(nil), value.Details...)
 	return value
 }
 

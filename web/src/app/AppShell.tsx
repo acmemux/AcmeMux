@@ -7,7 +7,11 @@ import { StatusBadge } from "../components/StatusBadge";
 
 const navigation = [
   { label: "Overview", state: "current" },
-  { label: "Certificates", state: "planned" },
+  {
+    label: "Certificates",
+    state: "available",
+    href: "#certificate-inventory",
+  },
   { label: "Configuration", state: "planned" },
   { label: "Operations", state: "available", href: "#manual-operation" },
   { label: "Workspace", state: "planned" },

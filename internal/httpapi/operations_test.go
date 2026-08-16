@@ -198,6 +198,17 @@ func terminalOperationFixture() jobs.Operation {
 		Output: "certificate evaluated\n", Items: []jobs.ItemResult{{
 			Name: "gateway@example", State: jobs.ItemCompleted, Code: "evaluated",
 		}},
+		Request: jobs.Request{
+			ReviewedEvidenceSHA256: strings.Repeat("b", 64), Items: []string{"gateway@example"},
+			Context: jobs.RequestContext{
+				RuntimeIdentity: "v5.3.1", RuntimeManifestID: "lego-v5.3.1",
+				ConfigurationPath: "/srv/acme/.lego.yml", StoragePath: "/srv/acme/.lego",
+			},
+			Details: []jobs.RequestItem{{
+				Name: "gateway@example", Account: "admin@example.com", CA: "letsencrypt",
+				ChallengeKind: "http-01", ChallengeMode: "listener",
+			}},
+		},
 	}
 }
 
@@ -242,7 +253,10 @@ func TestOperationEndpointsPresentBoundedPreviewLifecycleAndResult(t *testing.T)
 	latest := harness.request(t, http.MethodGet, "/api/v1/operations/latest", "", false)
 	if latest.Code != http.StatusOK || !strings.Contains(latest.Body.String(), `"state":"available"`) ||
 		!strings.Contains(latest.Body.String(), `"reasonCode":"execution_succeeded"`) ||
-		!strings.Contains(latest.Body.String(), `"certificateCount":1`) {
+		!strings.Contains(latest.Body.String(), `"certificateCount":1`) ||
+		!strings.Contains(latest.Body.String(), `"identity":"v5.3.1"`) ||
+		!strings.Contains(latest.Body.String(), `"ca":"letsencrypt"`) ||
+		!strings.Contains(latest.Body.String(), `"nextAction":`) {
 		t.Fatalf("latest response = %d %s", latest.Code, latest.Body.String())
 	}
 }

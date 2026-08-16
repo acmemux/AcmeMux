@@ -151,6 +151,7 @@ const certificate: CertificateInventoryItem = {
   dnsNames: ["gateway.home.example", "home.example"],
   issuer: "Let's Encrypt Authority X3",
   expiresAt: "2030-03-31T12:30:00Z",
+  health: "healthy",
   artifact: {
     nativePath: "/srv/lego/data/certificates/gateway.home.example.crt",
     ...metadata,

@@ -26,6 +26,8 @@ Only one workspace operation or configuration edit can be active. There is no br
 
 AcmeMux retains only the active operation or latest result. It does not provide long-term job history.
 
+The latest result also retains bounded secret-free identity for the reviewed lego runtime, native configuration and storage paths, and selected account, CA, challenge, or provider. It does not retain native configuration contents or certificate and key material.
+
 ## Runtime boundary
 
 AcmeMux starts the reviewed lego executable directly, without a shell, using the adopted native configuration and working directory. Provider credentials come only from supported reviewed configuration. Standard input is disconnected, output is bounded and redacted, and the operation is limited to 30 minutes.
@@ -54,4 +56,4 @@ Certificate rows are conservative. If AcmeMux cannot prove what happened to one 
 - After failure, partial completion, timeout, interruption, or ambiguity, inspect certificate-level states, the redacted output, native storage, and inventory status before choosing another operation.
 - If inventory refresh is unavailable, restore safe access to lego and the workspace before retrying.
 
-See [automatic renewal](automatic-renewal.md) for scheduled behavior, [workspace adoption](workspace-adoption.md) for path prerequisites, and [configuration recovery](native-configuration.md#interrupted-change-recovery) for blocked edits.
+See [certificate health and latest reporting](certificate-health-and-reporting.md) for health, time, stale-inventory, and latest-only behavior; [automatic renewal](automatic-renewal.md) for scheduled behavior; [workspace adoption](workspace-adoption.md) for path prerequisites; and [configuration recovery](native-configuration.md#interrupted-change-recovery) for blocked edits.
