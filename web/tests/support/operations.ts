@@ -7,6 +7,16 @@ export const operationPolicy = {
   timeoutSeconds: 1800,
 } as const;
 
+export const disabledAutomaticSchedule = {
+  state: "disabled",
+  enabled: false,
+  timeZone: null,
+  localTime: null,
+  nextEvaluationAt: null,
+  lastTriggeredAt: null,
+  reasonCode: "not_configured",
+} as const;
+
 export const manualOperationPreview = {
   state: "review_required",
   reviewedPreviewToken: "P".repeat(43),
@@ -117,6 +127,8 @@ export const idleOperationClient = {
   getCancelPolicy: async () => operationPolicy,
   previewManual: async () => JSON.parse(JSON.stringify(manualOperationPreview)),
   enqueueManual: async () => queuedOperation,
+  getAutomaticSchedule: async () => disabledAutomaticSchedule,
+  updateAutomaticSchedule: async () => disabledAutomaticSchedule,
 };
 
 type OperationMockOptions = {
@@ -128,6 +140,7 @@ type OperationMockOptions = {
     code: "operation_active" | "operation_changed" | "service_unavailable";
     status: 409 | 503;
   };
+  schedule?: Record<string, unknown>;
 };
 
 export async function mockOperations(
@@ -140,14 +153,18 @@ export async function mockOperations(
   let latest: Record<string, unknown> = options.initialLatest ?? {
     state: "empty",
   };
+  let schedule: Record<string, unknown> =
+    options.schedule ?? disabledAutomaticSchedule;
   const observations: {
     previews: unknown[];
     enqueues: unknown[];
+    scheduleUpdates: unknown[];
     setActive(operation: Record<string, unknown>): void;
     complete(result: Record<string, unknown>): void;
   } = {
     previews: [],
     enqueues: [],
+    scheduleUpdates: [],
     setActive(operation) {
       status = { state: "active", operation };
     },
@@ -156,6 +173,37 @@ export async function mockOperations(
       latest = { state: "available", result };
     },
   };
+
+  await page.route("**/api/v1/automatic-schedule", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        body: JSON.stringify(schedule),
+        contentType: "application/json",
+        status: 200,
+      });
+      return;
+    }
+    if (route.request().method() === "PUT") {
+      const update = route.request().postDataJSON() as Record<string, unknown>;
+      observations.scheduleUpdates.push(update);
+      schedule = {
+        state: update.enabled ? "scheduled" : "disabled",
+        enabled: update.enabled,
+        timeZone: update.timeZone,
+        localTime: update.localTime,
+        nextEvaluationAt: update.enabled ? "2030-01-02T10:35:00Z" : null,
+        lastTriggeredAt: null,
+        reasonCode: update.enabled ? "schedule_saved" : "schedule_disabled",
+      };
+      await route.fulfill({
+        body: JSON.stringify(schedule),
+        contentType: "application/json",
+        status: 200,
+      });
+      return;
+    }
+    await route.fulfill({ status: 405 });
+  });
 
   await page.route("**/api/v1/operations/status", async (route) => {
     if (route.request().method() !== "GET") {

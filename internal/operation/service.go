@@ -202,13 +202,7 @@ func (service *Service) Enqueue(
 		_ = lease.Release()
 		return jobs.Operation{}, ErrChanged
 	}
-	request := jobs.Request{
-		ReviewedEvidenceSHA256: plan.ReviewedEvidenceSHA256,
-		Items:                  make([]string, len(plan.Intent.Certificates)),
-	}
-	for index, certificate := range plan.Intent.Certificates {
-		request.Items[index] = certificate.Name
-	}
+	request := requestFromPlan(plan)
 	plan.Close()
 	if releaseErr := lease.Release(); releaseErr != nil {
 		return jobs.Operation{}, ErrUnavailable
@@ -224,6 +218,50 @@ func (service *Service) Enqueue(
 		return jobs.Operation{}, ErrUnavailable
 	}
 	return operation, nil
+}
+
+// EnqueueScheduled prepares current native evidence and commits one automatic
+// evaluation through the same latest-only durable worker and executor as a
+// reviewed manual run. It never computes certificate renewal eligibility.
+func (service *Service) EnqueueScheduled(ctx context.Context) (jobs.Operation, error) {
+	if service == nil || service.jobs == nil || service.coordinator == nil || service.configuration == nil {
+		return jobs.Operation{}, ErrUnavailable
+	}
+	service.enqueueMu.Lock()
+	defer service.enqueueMu.Unlock()
+	lease, err := service.coordinator.TryAcquire(ctx, workspace.PurposeScheduled)
+	if err != nil {
+		return jobs.Operation{}, operationAcquireError(err)
+	}
+	plan, preparationErr := service.configuration.PrepareExecution(ctx, lease)
+	if preparationErr != nil {
+		_ = lease.Release()
+		return jobs.Operation{}, operationPreparationError(preparationErr)
+	}
+	request := requestFromPlan(plan)
+	plan.Close()
+	if releaseErr := lease.Release(); releaseErr != nil {
+		return jobs.Operation{}, ErrUnavailable
+	}
+	operation, err := service.jobs.EnqueueScheduled(ctx, request)
+	if err != nil {
+		if errors.Is(err, jobs.ErrActive) {
+			return jobs.Operation{}, ErrActive
+		}
+		return jobs.Operation{}, ErrUnavailable
+	}
+	return operation, nil
+}
+
+func requestFromPlan(plan *configuration.ExecutionPlan) jobs.Request {
+	request := jobs.Request{
+		ReviewedEvidenceSHA256: plan.ReviewedEvidenceSHA256,
+		Items:                  make([]string, len(plan.Intent.Certificates)),
+	}
+	for index, certificate := range plan.Intent.Certificates {
+		request.Items[index] = certificate.Name
+	}
+	return request
 }
 
 func (service *Service) Status(ctx context.Context) (jobs.Operation, error) {
@@ -245,6 +283,20 @@ func (service *Service) Latest(ctx context.Context) (jobs.Operation, error) {
 }
 
 func (service *Service) Policy() Policy { return service.policy }
+
+// Ready closes after durable operation restart reconciliation completes.
+func (service *Service) Ready() <-chan struct{} {
+	if service == nil || service.jobs == nil {
+		return nil
+	}
+	return service.jobs.Ready()
+}
+
+// InterruptedOnStart is consumed by the scheduler after Ready to avoid a
+// blind immediate evaluation following ambiguous interrupted work.
+func (service *Service) InterruptedOnStart() bool {
+	return service != nil && service.jobs != nil && service.jobs.InterruptedOnStart()
+}
 
 func operationAcquireError(err error) error {
 	if errors.Is(err, workspace.ErrWorkspaceBusy) {

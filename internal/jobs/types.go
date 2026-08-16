@@ -30,11 +30,14 @@ type Request struct {
 	Items                  []string
 }
 
-// Kind identifies the bounded operation family. Task 08 introduces only the
-// fixed native file-mode manual operation.
+// Kind identifies which trusted product path accepted a fixed native
+// file-mode operation. Both kinds use the same executor and safety boundary.
 type Kind string
 
-const KindManual Kind = "manual"
+const (
+	KindManual    Kind = "manual"
+	KindScheduled Kind = "scheduled"
+)
 
 // State is the durable operation lifecycle and terminal classification.
 type State string

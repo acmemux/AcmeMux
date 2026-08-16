@@ -29,15 +29,25 @@ func NewStore(database Database) (*Store, error) {
 	return &Store{database: database}, nil
 }
 
-// Enqueue atomically persists the accepted request before any worker wake or
-// native preparation. A queued/running/pending-reconciliation record blocks a
-// second accepted request.
+// Enqueue atomically persists a manually accepted request. It remains the
+// narrow compatibility entry point used by store-level tests and callers that
+// cannot select a trusted product trigger.
 func (store *Store) Enqueue(ctx context.Context, id string, request Request, now time.Time) (Operation, error) {
+	return store.EnqueueKind(ctx, id, KindManual, request, now)
+}
+
+// EnqueueKind atomically persists an accepted trusted request before any
+// worker wake or native preparation. A queued/running/pending-reconciliation
+// record blocks a second accepted request.
+func (store *Store) EnqueueKind(ctx context.Context, id string, kind Kind, request Request, now time.Time) (Operation, error) {
 	if err := store.ready(ctx); err != nil {
 		return Operation{}, err
 	}
 	if err := validateID(id); err != nil {
 		return Operation{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	if kind != KindManual && kind != KindScheduled {
+		return Operation{}, fmt.Errorf("%w: operation kind is invalid", ErrInvalid)
 	}
 	if err := validateRequest(request); err != nil {
 		return Operation{}, fmt.Errorf("%w: %v", ErrInvalid, err)
@@ -74,10 +84,10 @@ INSERT INTO operation_latest (
     singleton_id, operation_id, reviewed_evidence_sha256, kind, state, phase, requested_at_utc,
     started_at_utc, finished_at_utc, updated_at_utc, reason_code,
     may_have_changed, inventory_state, inventory_code, redacted_output,
-    output_truncated, inventory_certificate_count
-) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, '', 0, ?, '', '', 0, NULL)`,
+    output_truncated, inventory_certificate_count, request_kind
+) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, '', 0, ?, '', '', 0, NULL, ?)`,
 		latestOperationID, id, request.ReviewedEvidenceSHA256, KindManual, StateQueued, PhaseQueued, timestamp,
-		timestamp, InventoryPending,
+		timestamp, InventoryPending, kind,
 	); err != nil {
 		return Operation{}, fmt.Errorf("persist queued operation: %w", err)
 	}
@@ -636,7 +646,7 @@ func validateOperation(operation Operation) error {
 	if err := validateID(operation.ID); err != nil {
 		return err
 	}
-	if operation.Kind != KindManual {
+	if operation.Kind != KindManual && operation.Kind != KindScheduled {
 		return errors.New("operation kind is invalid")
 	}
 	if err := validateRequest(operation.Request); err != nil {
@@ -744,7 +754,7 @@ const loadOperationSQL = `
 SELECT
     operation_id,
     reviewed_evidence_sha256,
-    kind,
+    request_kind,
     state,
     phase,
     requested_at_utc,

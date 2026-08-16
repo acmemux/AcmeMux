@@ -42,8 +42,8 @@ dialog, navigating away, losing the browser connection, or letting the browser
 session expire after that commit does not cancel or erase the request. Status
 can be observed later from another authenticated browser session.
 
-One latest-only SQLite record retains the accepted certificate scope, active
-phase, terminal classification, bounded redacted transcript, and inventory
+One latest-only SQLite record retains the accepted certificate scope, trigger
+kind, active phase, terminal classification, bounded redacted transcript, and inventory
 reconciliation summary. AcmeMux does not provide long-term job history. A
 queued request that never started remains eligible for the worker after a
 service restart. A request that was already running is instead marked
@@ -56,6 +56,11 @@ retry automatically after a failure, timeout, interruption, unknown enqueue
 response, output-limit result, or other ambiguous outcome. Reopening a queued
 request after restart is continuation of accepted work, not a retry of a
 started process.
+
+Automatic evaluation uses this same worker and result model without a browser
+preview token. The scheduler prepares current evidence, durably enqueues a
+`scheduled` operation, and still relies on execution-time revalidation. See
+`automatic-renewal.md` for timing, coalescing, and restart behavior.
 
 ## Exact process boundary
 
@@ -166,3 +171,5 @@ See `runtime-compatibility.md`, `workspace-adoption.md`, and
 run. See `ca-certificate-http.md` for the native account, certificate, renewal,
 and HTTP-01 fields evaluated by this operation. See `dns-providers.md` for the
 curated DNS-01 credential and provider boundary.
+Automatic cadence, IANA-zone calculation, UTC presentation, coalescing, and
+restart behavior are documented in `automatic-renewal.md`.

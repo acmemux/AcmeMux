@@ -10,6 +10,7 @@ import { vi } from "vitest";
 import { App } from "../App";
 import {
   OperationRequestError,
+  type AutomaticSchedule,
   type ActiveOperation,
   type LatestOperation,
   type ManualOperationPreview,
@@ -26,6 +27,7 @@ import type { RuntimeClient, RuntimeSnapshot } from "../api/runtime";
 import type { SessionClient } from "../api/session";
 import type { WorkspaceClient, WorkspaceSnapshot } from "../api/workspace";
 import {
+  disabledAutomaticSchedule,
   manualOperationPreview,
   operationPolicy,
   partialOperationResult,
@@ -86,6 +88,12 @@ function operationClientWith({
       clone<ManualOperationPreview>(manualOperationPreview),
     ),
     enqueueManual: vi.fn(async () => clone<ActiveOperation>(queuedOperation)),
+    getAutomaticSchedule: vi.fn(async () =>
+      clone<AutomaticSchedule>(disabledAutomaticSchedule),
+    ),
+    updateAutomaticSchedule: vi.fn(async () =>
+      clone<AutomaticSchedule>(disabledAutomaticSchedule),
+    ),
     ...overrides,
   };
 }
@@ -106,6 +114,85 @@ describe("manual operation experience", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
     vi.clearAllMocks();
+  });
+
+  it("configures one typed daily automatic schedule and shows local plus UTC time", async () => {
+    const saved: AutomaticSchedule = {
+      state: "scheduled",
+      enabled: true,
+      timeZone: "America/Denver",
+      localTime: "03:35",
+      nextEvaluationAt: "2030-01-02T10:35:00Z",
+      lastTriggeredAt: null,
+      reasonCode: "schedule_saved",
+    };
+    const updateAutomaticSchedule = vi.fn<
+      OperationClient["updateAutomaticSchedule"]
+    >(async () => clone<AutomaticSchedule>(saved));
+    const client = operationClientWith({
+      overrides: { updateAutomaticSchedule },
+    });
+    renderReadyApp(client);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Automatic renewal evaluation",
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Enable daily evaluation/i }),
+    );
+    fireEvent.change(screen.getByLabelText(/IANA time zone/i), {
+      target: { value: "America/Denver" },
+    });
+    fireEvent.change(screen.getByLabelText(/Local evaluation time/i), {
+      target: { value: "03:35" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save automatic schedule" }),
+    );
+
+    await waitFor(() =>
+      expect(updateAutomaticSchedule).toHaveBeenCalledWith({
+        enabled: true,
+        timeZone: "America/Denver",
+        localTime: "03:35",
+      }),
+    );
+    expect(await screen.findByText("03:35 America/Denver")).toBeInTheDocument();
+    expect(screen.getByText("2030-01-02T10:35:00Z")).toBeInTheDocument();
+    expect(screen.getByText(/no cron syntax or backlog/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/upstream lego alone applies ARI/i),
+    ).toBeInTheDocument();
+  });
+
+  it("explains deferred automatic evaluation without presenting a backlog or retry", async () => {
+    const deferred: AutomaticSchedule = {
+      state: "deferred",
+      enabled: true,
+      timeZone: "UTC",
+      localTime: "03:35",
+      nextEvaluationAt: "2030-01-01T03:35:00Z",
+      lastTriggeredAt: null,
+      reasonCode: "operation_active",
+    };
+    const client = operationClientWith({
+      overrides: {
+        getAutomaticSchedule: vi.fn(async () => deferred),
+      },
+    });
+    renderReadyApp(client);
+
+    expect(
+      await screen.findByText("Due evaluation is deferred", { exact: true }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/one coalesced evaluation remains due/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/never replayed automatically/i),
+    ).toBeInTheDocument();
   });
 
   it("reviews semantic whole-workspace intent before enqueueing only the opaque token", async () => {

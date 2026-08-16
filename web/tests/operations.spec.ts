@@ -70,6 +70,40 @@ test("reviews and durably enqueues one semantic whole-workspace operation", asyn
   ).toHaveCount(0);
 });
 
+test("enables one daily IANA-zone schedule and presents its exact UTC instant", async ({
+  page,
+}) => {
+  const observations = await mockOperations(page);
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("heading", { name: "Automatic renewal evaluation" }),
+  ).toBeVisible();
+  await page
+    .getByRole("checkbox", { name: /Enable daily evaluation/i })
+    .check();
+  await page.getByLabel(/IANA time zone/i).fill("America/Denver");
+  await page.getByLabel(/Local evaluation time/i).fill("03:35");
+  await page.getByRole("button", { name: "Save automatic schedule" }).click();
+
+  await expect(
+    page.getByText("03:35 America/Denver", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("2030-01-02T10:35:00Z", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/upstream lego alone applies ARI/i),
+  ).toBeVisible();
+  expect(observations.scheduleUpdates).toEqual([
+    {
+      enabled: true,
+      timeZone: "America/Denver",
+      localTime: "03:35",
+    },
+  ]);
+});
+
 test("keeps active work visible and blocks native mutations without a cancel action", async ({
   page,
 }) => {
@@ -193,7 +227,7 @@ test("operation review and result remain usable at a narrow viewport", async ({
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "Manual certificate operation" }),
+    page.getByRole("heading", { name: "Certificate operations" }),
   ).toBeVisible();
   const widths = await page.evaluate(() => ({
     client: document.documentElement.clientWidth,

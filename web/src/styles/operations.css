@@ -51,6 +51,118 @@
   margin: 0;
 }
 
+.am-automatic-schedule {
+  display: grid;
+  gap: var(--am-space-5);
+  padding: var(--am-space-6);
+  background: var(--am-color-canvas-raised);
+  border: 1px solid var(--am-color-line-strong);
+  border-left: 3px solid var(--am-color-amber);
+  border-radius: var(--am-radius-sm);
+}
+
+.am-automatic-schedule .am-panel__heading p:last-child {
+  max-width: 54rem;
+  margin-bottom: 0;
+  color: var(--am-color-text-muted);
+}
+
+.am-schedule-form {
+  display: grid;
+  grid-template-columns:
+    minmax(15rem, 1.2fr) minmax(14rem, 1fr) minmax(12rem, 0.8fr)
+    auto;
+  align-items: end;
+  gap: var(--am-space-4);
+}
+
+.am-schedule-toggle,
+.am-schedule-field {
+  display: grid;
+  min-width: 0;
+  gap: var(--am-space-2);
+}
+
+.am-schedule-toggle {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  padding: var(--am-space-4);
+  background: var(--am-color-surface);
+  border: 1px solid var(--am-color-line);
+  cursor: pointer;
+}
+
+.am-schedule-toggle input {
+  width: 1.2rem;
+  height: 1.2rem;
+  margin-top: 0.15rem;
+  accent-color: var(--am-color-cyan);
+}
+
+.am-schedule-toggle span {
+  display: grid;
+  gap: var(--am-space-1);
+}
+
+.am-schedule-toggle small,
+.am-schedule-field small {
+  color: var(--am-color-text-muted);
+  font-size: var(--am-text-xs);
+}
+
+.am-schedule-field > span {
+  font-size: var(--am-text-sm);
+  font-weight: 700;
+}
+
+.am-schedule-field input {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0 var(--am-space-3);
+  color: var(--am-color-text);
+  background: var(--am-color-surface);
+  border: 1px solid var(--am-color-line-strong);
+  border-radius: var(--am-radius-xs);
+  font: inherit;
+}
+
+.am-schedule-field input:focus-visible {
+  border-color: var(--am-color-cyan);
+  outline: 2px solid var(--am-color-cyan);
+  outline-offset: 2px;
+}
+
+.am-schedule-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: var(--am-color-line);
+  border: 1px solid var(--am-color-line);
+}
+
+.am-schedule-facts > div {
+  display: grid;
+  min-width: 0;
+  gap: var(--am-space-1);
+  padding: var(--am-space-4);
+  background: var(--am-color-surface);
+}
+
+.am-schedule-facts dt {
+  color: var(--am-color-text-muted);
+  font-size: var(--am-text-xs);
+  text-transform: uppercase;
+}
+
+.am-schedule-facts dd {
+  min-width: 0;
+  margin: 0;
+  font-family: var(--am-font-mono);
+  font-size: var(--am-text-sm);
+  overflow-wrap: anywhere;
+}
+
 .am-operation-start {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -412,6 +524,11 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .am-schedule-form,
+  .am-schedule-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .am-operation-start > .am-button {
     width: 100%;
   }
@@ -426,6 +543,8 @@
   }
 
   .am-operation-policy,
+  .am-schedule-form,
+  .am-schedule-facts,
   .am-operation-review__scope,
   .am-operation-review__certificates li > dl {
     grid-template-columns: minmax(0, 1fr);

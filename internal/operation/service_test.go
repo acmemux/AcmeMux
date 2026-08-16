@@ -107,11 +107,13 @@ type fakeBroker struct {
 	started chan struct{}
 	release chan struct{}
 	runs    int
+	request broker.Request
 }
 
 func (fake *fakeBroker) Run(ctx context.Context, request broker.Request) (broker.Result, error) {
 	fake.mu.Lock()
 	fake.runs++
+	fake.request = request
 	started, release := fake.started, fake.release
 	result, err := fake.result, fake.err
 	fake.mu.Unlock()
@@ -306,6 +308,40 @@ func TestPreviewEnqueueAndRunSurviveBrowserRequestLifetime(t *testing.T) {
 		latest.Inventory.State != jobs.InventoryRefreshed || len(latest.Items) != 1 ||
 		latest.Items[0].State != jobs.ItemCompleted || reauthorized.Load() != 1 {
 		t.Fatalf("latest = %#v, reauthorized=%d", latest, reauthorized.Load())
+	}
+}
+
+func TestScheduledOperationUsesTheSameDurableExecutorPath(t *testing.T) {
+	fixture := newOperationFixture(t)
+	queued, err := fixture.service.EnqueueScheduled(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.Kind != jobs.KindScheduled || queued.State != jobs.StateQueued {
+		t.Fatalf("scheduled enqueue = %#v", queued)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- fixture.service.Run(ctx) }()
+	latest := waitForLatest(t, fixture.service)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if latest.Kind != jobs.KindScheduled || latest.State != jobs.StateSucceeded ||
+		latest.Code != "execution_succeeded" || latest.Inventory.State != jobs.InventoryRefreshed {
+		t.Fatalf("scheduled result = %#v", latest)
+	}
+	fixture.broker.mu.Lock()
+	runs := fixture.broker.runs
+	request := fixture.broker.request
+	fixture.broker.mu.Unlock()
+	if runs != 1 {
+		t.Fatalf("scheduled broker runs = %d, want 1", runs)
+	}
+	if request.WorkingDirectory != fixture.selection.Review.WorkingDirectory.Path ||
+		request.ConfigurationPath != fixture.selection.Review.Configuration.Path || len(request.Environment) != 0 {
+		t.Fatalf("scheduled broker request = %#v", request)
 	}
 }
 

@@ -141,6 +141,91 @@ describe("operation client", () => {
     );
   });
 
+  it("loads scheduled operation kinds and strict automatic schedule evidence", async () => {
+    const scheduledActive = { ...activeOperation, kind: "scheduled" as const };
+    const scheduledResult = { ...terminalResult, kind: "scheduled" as const };
+    await expect(
+      clientWith({ state: "active", operation: scheduledActive }).getStatus(),
+    ).resolves.toEqual({ state: "active", operation: scheduledActive });
+    await expect(
+      clientWith({ state: "available", result: scheduledResult }).getLatest(),
+    ).resolves.toEqual({ state: "available", result: scheduledResult });
+
+    const schedule = {
+      state: "scheduled",
+      enabled: true,
+      timeZone: "America/Denver",
+      localTime: "03:35",
+      nextEvaluationAt: "2030-01-02T10:35:00Z",
+      lastTriggeredAt: "2030-01-01T10:35:00Z",
+      reasonCode: "triggered",
+    } as const;
+    await expect(clientWith(schedule).getAutomaticSchedule()).resolves.toEqual(
+      schedule,
+    );
+
+    const request = vi.fn<FetchImplementation>(async () =>
+      jsonResponse(schedule),
+    );
+    const client = createOperationClient({
+      fetch: request,
+      readCookies: () => "__Host-acmemux_csrf=schedule-token",
+    });
+    await expect(
+      client.updateAutomaticSchedule({
+        enabled: true,
+        timeZone: "America/Denver",
+        localTime: "03:35",
+      }),
+    ).resolves.toEqual(schedule);
+    expect(request.mock.calls[0]?.[0]).toBe("/api/v1/automatic-schedule");
+    expect(request.mock.calls[0]?.[1]?.body).toBe(
+      JSON.stringify({
+        enabled: true,
+        timeZone: "America/Denver",
+        localTime: "03:35",
+      }),
+    );
+    expect(
+      new Headers(request.mock.calls[0]?.[1]?.headers).get(CSRF_HEADER_NAME),
+    ).toBe("schedule-token");
+  });
+
+  it.each([
+    {
+      state: "scheduled",
+      enabled: true,
+      timeZone: "America/Denver",
+      localTime: "03:35",
+      nextEvaluationAt: null,
+      lastTriggeredAt: null,
+      reasonCode: "schedule_saved",
+    },
+    {
+      state: "disabled",
+      enabled: false,
+      timeZone: "UTC",
+      localTime: "3:35",
+      nextEvaluationAt: null,
+      lastTriggeredAt: null,
+      reasonCode: "schedule_disabled",
+    },
+    {
+      state: "disabled",
+      enabled: false,
+      timeZone: null,
+      localTime: null,
+      nextEvaluationAt: null,
+      lastTriggeredAt: null,
+      reasonCode: "not_configured",
+      cron: "* * * * *",
+    },
+  ])("rejects inconsistent or expanded schedule evidence", async (schedule) => {
+    await expect(
+      clientWith(schedule).getAutomaticSchedule(),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
   it("accepts the bounded native inventory count independently of result detail limits", async () => {
     const result = {
       ...terminalResult,

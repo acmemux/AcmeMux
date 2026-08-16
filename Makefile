@@ -7,7 +7,7 @@ GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
 export GOMODCACHE := $(CURDIR)/.cache/go-mod
 
-.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-runtime test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-runtime test-scheduler test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -72,6 +72,9 @@ test-broker:
 
 test-jobs:
 	go test ./internal/jobs/... ./internal/operation/... ./internal/state/...
+
+test-scheduler:
+	go test ./internal/scheduler/... ./internal/jobs/... ./internal/operation/... ./internal/httpapi/... ./internal/state/...
 
 test-lego-integration:
 	@test -n "$$ACMEMUX_TEST_LEGO" || (echo "ACMEMUX_TEST_LEGO must name the source-built lego executable" && exit 1)

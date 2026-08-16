@@ -42,11 +42,14 @@ non-root operating-system identity.
 - `internal/broker` owns the one exact no-shell file-mode process contract,
   bounded environment and output, process-tree lifetime, timeout, termination,
   and display-safe redacted results.
-- `internal/jobs` owns the latest-only durable manual-operation record and the
-  one service-lifetime worker whose context is independent of browser requests.
+- `internal/jobs` owns the latest-only durable manual or scheduled operation
+  record and the one service-lifetime worker whose context is independent of browser requests.
 - `internal/operation` owns non-writing whole-workspace review, durable enqueue,
   execution revalidation, broker coordination, certificate-level result
   classification, and mandatory native-inventory reconciliation.
+- `internal/scheduler` owns the singleton typed daily schedule, IANA-zone
+  calculation, UTC persistence, missed-date coalescing, contention wakeup, and
+  non-replay restart recovery.
 - `internal/state` owns application-only SQLite state and migrations.
 - `internal/webassets` owns the browser build embedded into the executable.
 - `internal/reporting` remains the explicit boundary for the later health and
@@ -63,7 +66,8 @@ and staged or active inode metadata. The executable itself, passwords, raw
 session or CSRF tokens, configuration review-token key, native content
 digests, field changes, and credential values are never stored. Certificate
 inventory is refreshed from native evidence and is not persisted. SQLite also
-contains the one accepted manual-operation scope and its active or latest
+contains the one current automatic schedule, next UTC evaluation, last trigger,
+and bounded recovery state, plus the one accepted manual or scheduled operation scope and its active or latest
 bounded result: stable secret-free reviewed evidence, certificate names,
 phases and times, stable reason codes, redacted output, certificate-level
 states, and inventory reconciliation status. It is not long-term job history.
@@ -140,7 +144,7 @@ a fresh inspection proves the active native files and full path boundary.
 Interrupted creation is identified separately in recovery; applied creation
 requires explicit validated adoption because no pre-edit selection exists.
 
-Manual native execution builds on all of these boundaries. A non-writing
+Manual and scheduled native execution build on all of these boundaries. A non-writing
 preview shows the exact runtime, native paths, configured certificate targets,
 and possible account, storage, backup, and external ACME effects. An opaque
 token binds that view to the complete current sources. Enqueue replays the
@@ -162,6 +166,13 @@ reconciliation stays explicit rather than being converted into success. A
 queued operation can continue after service restart, while a previously
 running operation is interrupted, reconciled, and never replayed. See
 `manual-operations.md`.
+
+The automatic scheduler is disabled until explicitly configured. It stores
+one daily local wall-clock time and IANA zone while presenting the exact next
+UTC instant. Missed dates coalesce, contention defers one due evaluation, and
+an interrupted operation advances to the next ordinary occurrence. Scheduled
+work enters the same durable operation and broker path; upstream `lego`
+retains ARI, lifetime, and random-delay authority. See `automatic-renewal.md`.
 
 The browser shell is composed from authored tokens and semantic components.
 React Aria supplies headless interaction behavior, while the application owns

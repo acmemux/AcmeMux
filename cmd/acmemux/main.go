@@ -22,6 +22,7 @@ import (
 	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
 	"github.com/sgurden-certleap/AcmeMux/internal/operation"
 	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
+	"github.com/sgurden-certleap/AcmeMux/internal/scheduler"
 	"github.com/sgurden-certleap/AcmeMux/internal/state"
 	"github.com/sgurden-certleap/AcmeMux/internal/webassets"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
@@ -146,6 +147,10 @@ func runServer(arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize durable native operations: %w", err)
 	}
+	automaticScheduler, err := scheduler.New(database, operationService, nil)
+	if err != nil {
+		return fmt.Errorf("initialize automatic renewal scheduler: %w", err)
+	}
 
 	assets, err := webassets.FS()
 	if err != nil {
@@ -173,7 +178,7 @@ func runServer(arguments []string) error {
 	}, httpapi.ConfigurationDependencies{
 		Service: configurationService,
 	}, httpapi.OperationDependencies{
-		Service: operationService,
+		Service: operationService, Scheduler: automaticScheduler,
 	}, assets, httpapi.SecurityConfig{
 		PublicOrigin:   config.PublicOrigin,
 		TrustedProxies: config.TrustedProxies,
@@ -193,11 +198,15 @@ func runServer(arguments []string) error {
 	go func() {
 		serveErrors <- server.Serve(listener)
 	}()
-	workerContext, stopWorker := context.WithCancel(context.Background())
-	defer stopWorker()
+	workerContext, stopWorkers := context.WithCancel(context.Background())
+	defer stopWorkers()
 	workerErrors := make(chan error, 1)
 	go func() {
 		workerErrors <- operationService.Run(workerContext)
+	}()
+	schedulerErrors := make(chan error, 1)
+	go func() {
+		schedulerErrors <- automaticScheduler.Run(workerContext)
 	}()
 
 	logger := log.New(os.Stderr, "acmemux: ", log.LstdFlags)
@@ -209,6 +218,7 @@ func runServer(arguments []string) error {
 	var result error
 	serveFinished := false
 	workerFinished := false
+	schedulerFinished := false
 	select {
 	case err = <-serveErrors:
 		serveFinished = true
@@ -222,9 +232,16 @@ func runServer(arguments []string) error {
 		} else {
 			result = fmt.Errorf("run native operation worker: %w", err)
 		}
+	case err = <-schedulerErrors:
+		schedulerFinished = true
+		if err == nil {
+			result = errors.New("automatic renewal scheduler stopped unexpectedly")
+		} else {
+			result = fmt.Errorf("run automatic renewal scheduler: %w", err)
+		}
 	case <-stopContext.Done():
 	}
-	stopWorker()
+	stopWorkers()
 	shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if shutdownErr := server.Shutdown(shutdownContext); shutdownErr != nil {
@@ -248,6 +265,16 @@ func runServer(arguments []string) error {
 			}
 		case <-shutdownContext.Done():
 			result = errors.Join(result, errors.New("native operation worker did not stop before shutdown deadline"))
+		}
+	}
+	if !schedulerFinished {
+		select {
+		case schedulerErr := <-schedulerErrors:
+			if schedulerErr != nil {
+				result = errors.Join(result, fmt.Errorf("stop automatic renewal scheduler: %w", schedulerErr))
+			}
+		case <-shutdownContext.Done():
+			result = errors.Join(result, errors.New("automatic renewal scheduler did not stop before shutdown deadline"))
 		}
 	}
 	return result
