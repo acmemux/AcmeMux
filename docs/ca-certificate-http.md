@@ -2,8 +2,8 @@
 
 AcmeMux exposes reviewed typed forms for the accepted ACME account,
 certificate, renewal, storage, and HTTP-01 fields in native `lego` YAML. The
-native file remains authoritative. AcmeMux does not keep a desired copy in
-SQLite, accept an arbitrary directory URL, or expose a raw YAML editor.
+native file remains authoritative. AcmeMux does not keep a second desired
+copy, accept an arbitrary directory URL, or expose a raw YAML editor.
 
 The forms are available only with an exact supported Linux amd64 `lego`
 runtime. Existing native content outside this integration is preserved, but an
@@ -64,11 +64,7 @@ prerequisite checks.
 The EAB key identifier is a public native field. The HMAC is accepted only as
 bounded URL-safe base64 and is write-only: responses and review summaries show
 presence or replacement, never the value. Both fields live in native YAML.
-They are not copied into SQLite, a journal, a URL, or a diagnostic.
-
-GoDaddy compatibility here means that the exact native mapping and admitted
-`lego` source path are tested. Ordinary verification has no GoDaddy
-entitlement or account secret and does not claim a live credentialed issuance.
+They are not copied into AcmeMux state, a URL, or a diagnostic.
 
 ## Accounts and certificates
 
@@ -80,8 +76,8 @@ entry rather than silently moving native account or certificate material.
 
 The account form selects its CA, contact email, account-key type, terms
 acknowledgement, and optional or required EAB. Account and certificate key
-choices are limited to the intersection supported by the exact upstream
-schema and source model: `EC256`, `EC384`, `RSA2048`, `RSA4096`, and `RSA8192`.
+choices are limited to the supported upstream set: `EC256`, `EC384`,
+`RSA2048`, `RSA4096`, and `RSA8192`.
 Changing the YAML key type does not rotate an already stored ACME account key.
 Create a new account name when changing account-key identity. Also use a new
 account name when moving between the SSL.com RSA and ECDSA directories: both
