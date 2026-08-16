@@ -36,7 +36,7 @@ const readyConfiguration: ConfigurationSnapshot = {
   source,
   projection: [
     {
-      fieldId: "account.eab_hmac",
+      fieldId: "account.eab.hmac_key",
       bindings: [{ id: "account", value: "home" }],
       label: "External account binding secret",
       kind: "secret",
@@ -59,6 +59,116 @@ const readyConfiguration: ConfigurationSnapshot = {
   ],
   diagnostics: [],
   capabilities: { editing: true, execution: true },
+};
+
+const creationRequired: ConfigurationSnapshot = {
+  state: "creation_required",
+  source: {
+    baseRevisionToken,
+    configurationPath: "",
+    dotenvPaths: [],
+    runtimeManifestId: "lego-v5.3.1",
+  },
+  diagnostics: [],
+  capabilities: { editing: false, execution: false },
+};
+
+const repairableConfiguration: ConfigurationSnapshot = {
+  state: "invalid",
+  source,
+  projection: [
+    {
+      fieldId: "workspace.storage",
+      bindings: [],
+      label: "Native storage directory",
+      kind: "string",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: ".lego",
+    },
+    ...[
+      ["account.server", "Certificate authority", "letsencrypt"],
+      ["account.email", "Account email", "admin@example.com"],
+      ["account.key_type", "Account key type", "EC256"],
+    ].map(([fieldId, label, value]) => ({
+      fieldId: fieldId!,
+      bindings: [{ id: "account", value: "primary" }],
+      label: label!,
+      kind: "string" as const,
+      present: true,
+      configured: true as const,
+      defaulted: false,
+      presenceKnown: true,
+      value: value!,
+    })),
+    {
+      fieldId: "account.accepts_terms_of_service",
+      bindings: [{ id: "account", value: "primary" }],
+      label: "Terms acknowledgement",
+      kind: "boolean",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: true,
+    },
+    ...[
+      ["challenge.http.address", "Listener address", ":8080"],
+      ["challenge.http.delay", "Validation delay", "0s"],
+    ].map(([fieldId, label, value]) => ({
+      fieldId: fieldId!,
+      bindings: [{ id: "challenge", value: "http-home" }],
+      label: label!,
+      kind: "string" as const,
+      present: true,
+      configured: true as const,
+      defaulted: false,
+      presenceKnown: true,
+      value: value!,
+    })),
+    {
+      fieldId: "certificate.domains",
+      bindings: [{ id: "certificate", value: "home" }],
+      label: "DNS names",
+      kind: "string_list",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: ["*.home.example.com"],
+    },
+    ...[
+      ["certificate.account", "Account", "primary"],
+      ["certificate.challenge", "Challenge", "http-home"],
+      ["certificate.key_type", "Certificate key type", "EC256"],
+    ].map(([fieldId, label, value]) => ({
+      fieldId: fieldId!,
+      bindings: [{ id: "certificate", value: "home" }],
+      label: label!,
+      kind: "string" as const,
+      present: true,
+      configured: true as const,
+      defaulted: false,
+      presenceKnown: true,
+      value: value!,
+    })),
+  ],
+  diagnostics: [
+    {
+      code: "semantic_validation_failed",
+      severity: "blocking",
+      role: "semantic",
+      message: "HTTP-01 cannot validate a wildcard DNS name.",
+      fieldId: "certificate.domains",
+      bindings: [{ id: "certificate", value: "home" }],
+      path: "/srv/lego/.lego.yml",
+      line: null,
+      column: null,
+    },
+  ],
+  capabilities: { editing: true, execution: false },
 };
 
 const authenticatedSession: SessionClient = {
@@ -95,6 +205,8 @@ function configurationClientWith(
     getConfiguration,
     previewChanges: vi.fn(),
     saveChanges: vi.fn(),
+    previewCreation: vi.fn(),
+    createConfiguration: vi.fn(),
     resolveRecovery: vi.fn(),
     ...overrides,
   };
@@ -107,6 +219,7 @@ function recoveryConfiguration(
     state: "recovery_required",
     source: { ...source, baseRevisionToken: revisionToken },
     recovery: {
+      operation: "edit",
       phase: "replacing",
       state: "ambiguous",
       targets: [
@@ -139,12 +252,16 @@ function controllerWith(
 ): ConfigurationController {
   return {
     error: null,
+    mutationError: null,
+    mutationPhase: "idle",
     phase: "idle",
     recoveryEvidenceStale: false,
     recoveryOutcomeUnknown: false,
     requestRevision: 1,
     snapshot,
     refresh: vi.fn(async () => undefined),
+    previewChanges: vi.fn(async () => null),
+    savePrepared: vi.fn(async () => false),
     resolveRecovery: vi.fn(async () => undefined),
   };
 }
@@ -181,6 +298,87 @@ describe("configuration mediation", () => {
     expect(
       await screen.findByText("Configuration engine ready"),
     ).toBeInTheDocument();
+  });
+
+  it("previews a runtime-bound creation before workspace adoption", async () => {
+    const previewCreation = vi.fn<ConfigurationClient["previewCreation"]>(
+      async () => ({ state: "unchanged", baseRevisionToken }),
+    );
+    render(
+      <App
+        configurationClient={configurationClientWith(
+          vi.fn(async () => creationRequired),
+          { previewCreation },
+        )}
+        runtimeClient={supportedRuntimeClient}
+        sessionClient={authenticatedSession}
+        workspaceClient={workspaceClientWith(
+          vi.fn(async () => ({ state: "unadopted" as const })),
+        )}
+      />,
+    );
+
+    await screen.findByText("Prepare the first supported configuration");
+    fireEvent.change(screen.getByLabelText("Working directory"), {
+      target: { value: "/srv/lego" },
+    });
+    fireEvent.change(screen.getByLabelText("Account email"), {
+      target: { value: "admin@example.com" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /acknowledge this CA's subscriber agreement/i,
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("DNS names"), {
+      target: { value: "home.example.com" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Preview native workspace creation",
+      }),
+    );
+
+    await waitFor(() => expect(previewCreation).toHaveBeenCalledTimes(1));
+    const [token, workingDirectory, configurationPath, changes] =
+      previewCreation.mock.calls[0]!;
+    expect(token).toBe(baseRevisionToken);
+    expect(workingDirectory).toBe("/srv/lego");
+    expect(configurationPath).toBeNull();
+    expect(changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldId: "challenge.http.delay",
+          operation: "set",
+          value: "0s",
+        }),
+        expect.objectContaining({
+          fieldId: "certificate.renew.days",
+          operation: "set",
+          value: 0,
+        }),
+        expect.objectContaining({
+          fieldId: "certificate.renew.reuse_key",
+          operation: "set",
+          value: false,
+        }),
+        expect.objectContaining({
+          fieldId: "certificate.renew.disable_random_sleep",
+          operation: "set",
+          value: false,
+        }),
+        expect.objectContaining({
+          fieldId: "certificate.renew.ari.disable",
+          operation: "set",
+          value: false,
+        }),
+        expect.objectContaining({
+          fieldId: "certificate.renew.ari.wait_to_renew_duration",
+          operation: "set",
+          value: "0s",
+        }),
+      ]),
+    );
   });
 
   it("blocks runtime and workspace controls while configuration status is in flight", async () => {
@@ -311,6 +509,9 @@ describe("configuration mediation", () => {
     expect(resolveRecovery).toHaveBeenCalledWith(
       baseRevisionToken,
       "adopt_current",
+      "edit",
+      "/srv/lego/.lego.yml",
+      "lego-v5.3.1",
     );
     expect(document.body).not.toHaveTextContent("No native files were changed");
 
@@ -399,6 +600,190 @@ describe("configuration mediation", () => {
     expect(container).not.toHaveTextContent(baseRevisionToken);
   });
 
+  it("preserves an effective unsupported challenge during an unrelated edit", async () => {
+    const unsupported: ConfigurationSnapshot = {
+      ...repairableConfiguration,
+      state: "unsupported",
+      projection: repairableConfiguration.projection
+        .filter((field) => !field.fieldId.startsWith("challenge.http."))
+        .map((field) => {
+          if (
+            field.fieldId === "certificate.domains" &&
+            field.configured &&
+            field.kind === "string_list"
+          ) {
+            return { ...field, value: ["home.example.com"] };
+          }
+          if (
+            field.fieldId === "certificate.challenge" &&
+            field.configured &&
+            field.kind === "string"
+          ) {
+            return {
+              ...field,
+              present: false,
+              defaulted: true,
+              value: "tls-alpn-01",
+            };
+          }
+          return field;
+        }),
+      diagnostics: [
+        {
+          code: "unsupported_challenge",
+          severity: "blocking",
+          role: "semantic",
+          message: "The effective TLS-ALPN challenge is preserved.",
+          fieldId: "certificate.challenge",
+          bindings: [{ id: "certificate", value: "home" }],
+          path: "/srv/lego/.lego.yml",
+          line: null,
+          column: null,
+        },
+      ],
+      capabilities: { editing: true, execution: false },
+    };
+    const previewChanges = vi.fn<ConfigurationClient["previewChanges"]>(
+      async () => ({ state: "unchanged", baseRevisionToken }),
+    );
+    render(
+      <App
+        configurationClient={configurationClientWith(
+          vi.fn(async () => unsupported),
+          { previewChanges },
+        )}
+        runtimeClient={supportedRuntimeClient}
+        sessionClient={authenticatedSession}
+        workspaceClient={workspaceClientWith()}
+      />,
+    );
+
+    await screen.findByText("Native content unsupported");
+    fireEvent.change(screen.getByLabelText("Storage directory"), {
+      target: { value: "./other-data" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Preview native configuration changes",
+      }),
+    );
+
+    await waitFor(() => expect(previewChanges).toHaveBeenCalledTimes(1));
+    expect(previewChanges).toHaveBeenCalledWith(baseRevisionToken, [
+      {
+        fieldId: "workspace.storage",
+        bindings: [],
+        operation: "set",
+        value: "./other-data",
+      },
+    ]);
+  });
+
+  it("previews and saves a typed repair for curated-invalid native values", async () => {
+    const reviewedPreviewToken = "C".repeat(43);
+    const previewChanges = vi.fn<ConfigurationClient["previewChanges"]>(
+      async () => ({
+        state: "review_required",
+        baseRevisionToken,
+        reviewedPreviewToken,
+        resultingState: "ready",
+        summary: [
+          {
+            fieldId: "certificate.domains",
+            bindings: [{ id: "certificate", value: "home" }],
+            label: "DNS names",
+            file: "configuration",
+            action: "changed",
+            sensitive: false,
+            before: { state: "value", value: ["*.home.example.com"] },
+            after: { state: "value", value: ["home.example.com"] },
+          },
+        ],
+        diagnostics: [],
+        executionAllowed: true,
+      }),
+    );
+    const repaired: ConfigurationSnapshot = {
+      ...repairableConfiguration,
+      state: "ready",
+      projection: repairableConfiguration.projection.map((field) =>
+        field.fieldId === "certificate.domains" &&
+        field.configured &&
+        field.kind === "string_list"
+          ? { ...field, value: ["home.example.com"] }
+          : field,
+      ),
+      diagnostics: [],
+      capabilities: { editing: true, execution: true },
+    };
+    const saveChanges = vi.fn<ConfigurationClient["saveChanges"]>(
+      async () => repaired,
+    );
+    render(
+      <App
+        configurationClient={configurationClientWith(
+          vi.fn(async () => repairableConfiguration),
+          { previewChanges, saveChanges },
+        )}
+        runtimeClient={supportedRuntimeClient}
+        sessionClient={authenticatedSession}
+        workspaceClient={workspaceClientWith()}
+      />,
+    );
+
+    await screen.findByText("Configuration needs repair");
+    fireEvent.change(screen.getByLabelText("DNS names"), {
+      target: { value: "home.example.com" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Preview native configuration changes",
+      }),
+    );
+    await waitFor(() => expect(previewChanges).toHaveBeenCalledTimes(1));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review 1 native change" }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /I reviewed every affected native file/i,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save reviewed changes" }),
+    );
+
+    await waitFor(() => expect(saveChanges).toHaveBeenCalledTimes(1));
+    expect(saveChanges).toHaveBeenCalledWith(
+      baseRevisionToken,
+      "/srv/lego/.lego.yml",
+      "lego-v5.3.1",
+      expect.arrayContaining([
+        {
+          fieldId: "certificate.domains",
+          bindings: [{ id: "certificate", value: "home" }],
+          operation: "set",
+          value: ["home.example.com"],
+        },
+      ]),
+      reviewedPreviewToken,
+    );
+    expect(await screen.findByText("Configuration engine ready")).toBeVisible();
+  });
+
+  it("keeps source-invalid native content read-only", () => {
+    const readOnly: ConfigurationSnapshot = {
+      ...repairableConfiguration,
+      capabilities: { editing: false, execution: false },
+    };
+    render(<ConfigurationPanel controller={controllerWith(readOnly)} />);
+
+    expect(screen.getByText("Configuration invalid")).toBeInTheDocument();
+    expect(
+      screen.queryByText("CA, certificate, and HTTP-01 configuration"),
+    ).not.toBeInTheDocument();
+  });
+
   it("presents fixed diagnostic copy for unsupported content", () => {
     const unsupported: ConfigurationSnapshot = {
       ...readyConfiguration,
@@ -446,6 +831,7 @@ describe("configuration mediation", () => {
         state: "recovery_required",
         source,
         recovery: {
+          operation: "edit",
           phase: "replacing",
           state: recoveryState,
           targets: [
@@ -493,4 +879,37 @@ describe("configuration mediation", () => {
       expect(controller.resolveRecovery).toHaveBeenCalledWith("adopt_current");
     },
   );
+
+  it("requires explicit adoption instead of finalization after interrupted creation", () => {
+    const recovery: ConfigurationSnapshot = {
+      ...recoveryConfiguration(),
+      recovery: {
+        operation: "creation",
+        phase: "finalizing",
+        state: "applied",
+        targets: [
+          {
+            role: "configuration",
+            path: "/srv/lego/.lego.yml",
+            state: "applied",
+          },
+        ],
+      },
+    };
+    render(<ConfigurationPanel controller={controllerWith(recovery)} />);
+
+    expect(
+      screen.queryByRole("button", {
+        name: "Validate and finalize replacement",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/has no previously adopted workspace to finalize/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Validate and adopt current files",
+      }),
+    ).toBeDisabled();
+  });
 });

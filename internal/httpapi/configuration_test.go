@@ -39,6 +39,12 @@ type configurationServiceStub struct {
 	previewBase   string
 	previewEdits  []nativeconfig.Change
 
+	creationPreviewResult  configuration.Preview
+	creationPreviewErr     error
+	creationPreviewCalls   int
+	creationPreviewBase    string
+	creationPreviewRequest configuration.CreationRequest
+
 	saveView    configuration.View
 	saveErr     error
 	saveCalls   int
@@ -47,6 +53,13 @@ type configurationServiceStub struct {
 	saveEdits   []nativeconfig.Change
 	beforeGuard func(context.Context) error
 	guardCalls  int
+
+	createView    configuration.View
+	createErr     error
+	createCalls   int
+	createBase    string
+	createReview  string
+	createRequest configuration.CreationRequest
 
 	recoveryView       configuration.View
 	recoveryErr        error
@@ -65,6 +78,18 @@ func (stub *configurationServiceStub) Preview(_ context.Context, base string, ed
 	stub.previewBase = base
 	stub.previewEdits = cloneConfigurationEdits(edits)
 	return stub.previewResult, stub.previewErr
+}
+
+func (stub *configurationServiceStub) PreviewCreation(
+	_ context.Context,
+	base string,
+	request configuration.CreationRequest,
+) (configuration.Preview, error) {
+	stub.creationPreviewCalls++
+	stub.creationPreviewBase = base
+	request.Changes = cloneConfigurationEdits(request.Changes)
+	stub.creationPreviewRequest = request
+	return stub.creationPreviewResult, stub.creationPreviewErr
 }
 
 func (stub *configurationServiceStub) Save(
@@ -91,6 +116,36 @@ func (stub *configurationServiceStub) Save(
 		return configuration.View{}, err
 	}
 	return stub.saveView, nil
+}
+
+func (stub *configurationServiceStub) Create(
+	ctx context.Context,
+	base string,
+	request configuration.CreationRequest,
+	review string,
+	guard workspace.CommitGuard,
+) (configuration.View, error) {
+	stub.createCalls++
+	stub.createBase = base
+	stub.createReview = review
+	request.Changes = cloneConfigurationEdits(request.Changes)
+	stub.createRequest = request
+	if stub.createErr != nil {
+		return configuration.View{}, stub.createErr
+	}
+	if stub.beforeGuard != nil {
+		if err := stub.beforeGuard(ctx); err != nil {
+			return configuration.View{}, err
+		}
+	}
+	stub.guardCalls++
+	if err := guard(ctx); err != nil {
+		return configuration.View{}, err
+	}
+	if stub.createView.State == "" {
+		return stub.saveView, nil
+	}
+	return stub.createView, nil
 }
 
 func (stub *configurationServiceStub) ResolveRecovery(
@@ -310,6 +365,14 @@ func validConfigurationSaveBody(value string) string {
 	return strings.TrimSuffix(body, "}") + `,"reviewedPreviewToken":"` + configurationPreviewToken + `"}`
 }
 
+func validConfigurationCreationBody(create bool) string {
+	body := `{"baseRevisionToken":"` + configurationBaseToken + `","workingDirectory":"/srv/acme","configurationPath":null,"changes":[{"fieldId":"workspace.storage","bindings":[],"operation":"set","value":"./native"}]`
+	if create {
+		body += `,"reviewedPreviewToken":"` + configurationPreviewToken + `"`
+	}
+	return body + `}`
+}
+
 func TestConfigurationHTTPRequiresSessionAndCSRFBeforeCallingService(t *testing.T) {
 	harness := newConfigurationHTTPHarness(t)
 
@@ -375,6 +438,119 @@ func TestConfigurationSnapshotPresentsOnlyLogicalBoundedState(t *testing.T) {
 	}
 }
 
+func TestConfigurationCreationRequiredSnapshotOmitsProjectionAndRecovery(t *testing.T) {
+	harness := newConfigurationHTTPHarness(t)
+	harness.service.snapshotView = configuration.View{
+		State: configuration.StateCreationRequired,
+		Source: configuration.Source{
+			BaseRevisionToken: configurationBaseToken, ConfigurationPath: "", DotenvPaths: []string{},
+			RuntimeManifestID: compatibility.ManifestLegoV531,
+		},
+		Diagnostics: []configuration.Diagnostic{},
+	}
+	response := harness.request(t, http.MethodGet, "/api/v1/configuration", "", false)
+	if response.Code != http.StatusOK {
+		t.Fatalf("creation-required status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["state"] != "creation_required" || len(payload) != 4 {
+		t.Fatalf("creation-required payload = %#v", payload)
+	}
+	if _, exists := payload["projection"]; exists {
+		t.Fatalf("creation-required response included projection: %#v", payload)
+	}
+	if _, exists := payload["recovery"]; exists {
+		t.Fatalf("creation-required response included recovery: %#v", payload)
+	}
+	source := payload["source"].(map[string]any)
+	if source["configurationPath"] != "" || len(source["dotenvPaths"].([]any)) != 0 {
+		t.Fatalf("creation-required source = %#v", source)
+	}
+}
+
+func TestConfigurationCreationPreviewAndCreateUseStrictReviewedWire(t *testing.T) {
+	harness := newConfigurationHTTPHarness(t)
+	harness.service.creationPreviewResult = configurationReviewPreviewFixture(t)
+	preview := harness.request(t, http.MethodPost, "/api/v1/configuration/creation-previews", validConfigurationCreationBody(false), true)
+	if preview.Code != http.StatusOK || harness.service.creationPreviewCalls != 1 ||
+		harness.service.creationPreviewBase != configurationBaseToken ||
+		harness.service.creationPreviewRequest.WorkingDirectory != "/srv/acme" ||
+		harness.service.creationPreviewRequest.ConfigurationPath != "" ||
+		len(harness.service.creationPreviewRequest.Changes) != 1 {
+		t.Fatalf("creation preview = status:%d body:%s calls:%d request:%#v",
+			preview.Code, preview.Body.String(), harness.service.creationPreviewCalls, harness.service.creationPreviewRequest)
+	}
+
+	harness.service.createView = configurationViewFixture(t)
+	created := harness.request(t, http.MethodPut, "/api/v1/configuration/creation", validConfigurationCreationBody(true), true)
+	if created.Code != http.StatusOK || harness.service.createCalls != 1 || harness.service.guardCalls != 1 ||
+		harness.service.createBase != configurationBaseToken || harness.service.createReview != configurationPreviewToken ||
+		harness.service.createRequest.WorkingDirectory != "/srv/acme" || harness.service.createRequest.ConfigurationPath != "" {
+		t.Fatalf("create = status:%d body:%s calls:%d guards:%d request:%#v",
+			created.Code, created.Body.String(), harness.service.createCalls, harness.service.guardCalls, harness.service.createRequest)
+	}
+}
+
+func TestConfigurationCreationRequestRequiresExplicitNullablePathAndExactShape(t *testing.T) {
+	harness := newConfigurationHTTPHarness(t)
+	tests := []string{
+		strings.Replace(validConfigurationCreationBody(false), `,"configurationPath":null`, "", 1),
+		strings.Replace(validConfigurationCreationBody(false), `"configurationPath":null`, `"configurationPath":""`, 1),
+		strings.TrimSuffix(validConfigurationCreationBody(false), "}") + `,"unknown":true}`,
+		strings.Replace(validConfigurationCreationBody(false), `"configurationPath":null`, `"configurationPath":null,"configurationPath":null`, 1),
+	}
+	for _, body := range tests {
+		response := harness.request(t, http.MethodPost, "/api/v1/configuration/creation-previews", body, true)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("invalid creation request = %d %s for %s", response.Code, response.Body.String(), body)
+		}
+	}
+	if harness.service.creationPreviewCalls != 0 {
+		t.Fatalf("invalid creation requests reached service %d times", harness.service.creationPreviewCalls)
+	}
+}
+
+func TestGTSCreationHTTPReviewNeverEchoesEABHMAC(t *testing.T) {
+	harness := newConfigurationHTTPHarness(t)
+	bindings := []nativeconfig.Binding{{ID: integrations.BindingAccount, Value: "home"}}
+	harness.service.creationPreviewResult = configuration.Preview{
+		State: configuration.PreviewReviewRequired, BaseRevisionToken: configurationBaseToken,
+		ReviewedPreviewToken: configurationPreviewToken, ResultingState: configuration.StateReady,
+		BaseInspection: nativeconfig.Inspection{},
+		Inspection: nativeconfig.Inspection{Projection: []nativeconfig.ProjectedField{{
+			FieldID: integrations.FieldAccountEABHMACKey, Bindings: bindings,
+			Label: "External Account Binding HMAC key", Kind: integrations.FieldString,
+			Present: true, Configured: true, PresenceKnown: true, Secret: true,
+		}}},
+		Summary: []nativeconfig.ChangeSummary{{
+			FieldID: integrations.FieldAccountEABHMACKey, Bindings: bindings,
+			Label: "External Account Binding HMAC key", Target: integrations.TargetYAML,
+			Action: nativeconfig.SummarySet, Secret: true,
+		}},
+		Execution: true,
+	}
+	body := `{"baseRevisionToken":"` + configurationBaseToken + `","workingDirectory":"/srv/acme","configurationPath":null,"changes":[{"fieldId":"account.eab.hmac_key","bindings":[{"id":"account","value":"home"}],"operation":"set","value":"` + configurationSecretCanary + `"}]}`
+	response := harness.request(t, http.MethodPost, "/api/v1/configuration/creation-previews", body, true)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GTS creation preview = %d %s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), configurationSecretCanary) {
+		t.Fatalf("GTS creation preview echoed EAB HMAC: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"action":"secret_replaced"`) ||
+		!strings.Contains(response.Body.String(), `"file":"configuration"`) ||
+		!strings.Contains(response.Body.String(), `"state":"present_secret"`) {
+		t.Fatalf("GTS creation secret summary = %s", response.Body.String())
+	}
+	received, ok := harness.service.creationPreviewRequest.Changes[0].Value.String()
+	if !ok || received != configurationSecretCanary {
+		t.Fatalf("service received EAB HMAC = %q, %v", received, ok)
+	}
+}
+
 func TestConfigurationRecoveryOmitsTransactionAndContentIdentity(t *testing.T) {
 	harness := newConfigurationHTTPHarness(t)
 	harness.service.snapshotView = configuration.View{
@@ -406,7 +582,7 @@ func TestConfigurationRecoveryOmitsTransactionAndContentIdentity(t *testing.T) {
 		t.Fatalf("recovery response included projection: %#v", payload)
 	}
 	recovery := payload["recovery"].(map[string]any)
-	if recovery["phase"] != "replacing" || recovery["state"] != "partial" {
+	if recovery["operation"] != "edit" || recovery["phase"] != "replacing" || recovery["state"] != "partial" {
 		t.Fatalf("recovery = %#v", recovery)
 	}
 	if _, exists := recovery["transactionId"]; exists {
@@ -414,6 +590,26 @@ func TestConfigurationRecoveryOmitsTransactionAndContentIdentity(t *testing.T) {
 	}
 	if strings.Contains(response.Body.String(), configurationSecretCanary) || strings.Contains(response.Body.String(), strings.Repeat("e", 64)) {
 		t.Fatalf("recovery response exposed transaction or content identity: %s", response.Body.String())
+	}
+}
+
+func TestConfigurationRecoveryIdentifiesInterruptedCreation(t *testing.T) {
+	presented, err := presentConfigurationSnapshot(configuration.View{
+		State: configuration.StateRecoveryRequired,
+		Source: configuration.Source{
+			BaseRevisionToken: configurationBaseToken, ConfigurationPath: "/srv/acme/.lego.yml",
+			DotenvPaths: []string{}, RuntimeManifestID: compatibility.ManifestLegoV531,
+		},
+		Recovery: &workspace.Recovery{
+			Bootstrap: true, Phase: workspace.JournalFinalizing, State: workspace.RecoveryApplied,
+			Files: []workspace.RecoveryFile{{Role: workspace.RoleConfiguration, Path: "/srv/acme/.lego.yml", State: workspace.RecoveryFileApplied}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if presented.Recovery == nil || presented.Recovery.Operation != "creation" {
+		t.Fatalf("creation recovery = %#v", presented.Recovery)
 	}
 }
 

@@ -69,4 +69,7 @@ selection, path review, persistence, and certificate inventory are documented
 in [docs/workspace-adoption.md](docs/workspace-adoption.md). Curated native
 field projection, write-only credentials, reviewed replacement, bounds, and
 interrupted-edit recovery are documented in
-[docs/native-configuration.md](docs/native-configuration.md).
+[docs/native-configuration.md](docs/native-configuration.md). Accepted CA
+presets, account registration prerequisites, certificate and renewal fields,
+HTTP-01 listener or webroot setup, and first-workspace creation are documented
+in [docs/ca-certificate-http.md](docs/ca-certificate-http.md).

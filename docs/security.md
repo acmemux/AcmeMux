@@ -216,6 +216,16 @@ file is consequently owned by and readable only to the intended service
 identity. AcmeMux never changes ownership or permissions to make an unsafe
 existing workspace eligible for editing.
 
+First-configuration creation uses the same boundary without treating an
+absent file as an implicit workspace. The server binds a reviewed safe working
+directory, explicit or conventional target, missing-target evidence, and every
+candidate storage, dotenv, and HTTP webroot path to opaque review tokens. The
+durable journal exists before candidate staging, and activation uses
+same-directory `RENAME_NOREPLACE`; creation never overwrites a target that
+appeared after review. A workspace selection is inserted only after fresh
+content and path inspection. An interrupted applied creation cannot use the
+ordinary edit finalization path and requires explicit adopt-current review.
+
 SQLite can retain one secret-free interrupted-edit journal containing target
 paths and inode placement metadata. It contains no source bytes, content
 digest, field ID, summary, or secret. Recovery classifies placement but never

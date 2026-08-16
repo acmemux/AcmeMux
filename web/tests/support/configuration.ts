@@ -5,7 +5,7 @@ type ConfigurationSnapshot = Record<string, unknown>;
 const source = {
   baseRevisionToken: "A".repeat(43),
   configurationPath: "/srv/lego/.lego.yml",
-  dotenvPaths: ["/srv/lego/cloudflare.env"],
+  dotenvPaths: [],
   runtimeManifestId: "lego-v5.3.1",
 };
 
@@ -14,12 +14,187 @@ export const readyConfiguration = {
   source,
   projection: [
     {
-      fieldId: "account.eab_hmac",
-      bindings: [{ id: "account", value: "home" }],
-      label: "External account binding secret",
-      kind: "secret",
+      fieldId: "account.accepts_terms_of_service",
+      bindings: [{ id: "account", value: "primary" }],
+      label: "CA terms acknowledgement",
+      kind: "boolean",
       present: true,
       configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: true,
+    },
+    {
+      fieldId: "account.eab.hmac_key",
+      bindings: [{ id: "account", value: "primary" }],
+      label: "External account binding HMAC",
+      kind: "secret",
+      present: false,
+      configured: false,
+      defaulted: false,
+      presenceKnown: true,
+    },
+    {
+      fieldId: "account.email",
+      bindings: [{ id: "account", value: "primary" }],
+      label: "Account email",
+      kind: "string",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: "admin@example.com",
+    },
+    {
+      fieldId: "account.key_type",
+      bindings: [{ id: "account", value: "primary" }],
+      label: "Account key type",
+      kind: "string",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: "EC256",
+    },
+    {
+      fieldId: "account.server",
+      bindings: [{ id: "account", value: "primary" }],
+      label: "Certificate authority",
+      kind: "string",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: "letsencrypt",
+    },
+    {
+      fieldId: "certificate.account",
+      bindings: [{ id: "certificate", value: "home" }],
+      label: "Certificate account",
+      kind: "string",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: "primary",
+    },
+    {
+      fieldId: "certificate.challenge",
+      bindings: [{ id: "certificate", value: "home" }],
+      label: "Certificate challenge",
+      kind: "string",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: "http-home",
+    },
+    {
+      fieldId: "certificate.domains",
+      bindings: [{ id: "certificate", value: "home" }],
+      label: "DNS names",
+      kind: "string_list",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: ["home.example.com"],
+    },
+    {
+      fieldId: "certificate.key_type",
+      bindings: [{ id: "certificate", value: "home" }],
+      label: "Certificate key type",
+      kind: "string",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: "EC256",
+    },
+    {
+      fieldId: "certificate.renew.ari.disable",
+      bindings: [{ id: "certificate", value: "home" }],
+      label: "Disable ARI",
+      kind: "boolean",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: false,
+    },
+    {
+      fieldId: "certificate.renew.ari.wait_to_renew_duration",
+      bindings: [{ id: "certificate", value: "home" }],
+      label: "ARI wait duration",
+      kind: "string",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: "0s",
+    },
+    {
+      fieldId: "certificate.renew.days",
+      bindings: [{ id: "certificate", value: "home" }],
+      label: "Renewal threshold",
+      kind: "integer",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: 0,
+    },
+    {
+      fieldId: "certificate.renew.disable_random_sleep",
+      bindings: [{ id: "certificate", value: "home" }],
+      label: "Disable random sleep",
+      kind: "boolean",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: false,
+    },
+    {
+      fieldId: "certificate.renew.reuse_key",
+      bindings: [{ id: "certificate", value: "home" }],
+      label: "Reuse certificate key",
+      kind: "boolean",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: false,
+    },
+    {
+      fieldId: "challenge.http.address",
+      bindings: [{ id: "challenge", value: "http-home" }],
+      label: "HTTP listener address",
+      kind: "string",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: ":8080",
+    },
+    {
+      fieldId: "challenge.http.delay",
+      bindings: [{ id: "challenge", value: "http-home" }],
+      label: "HTTP validation delay",
+      kind: "string",
+      present: true,
+      configured: true,
+      defaulted: false,
+      presenceKnown: true,
+      value: "0s",
+    },
+    {
+      fieldId: "challenge.http.proxy_header",
+      bindings: [{ id: "challenge", value: "http-home" }],
+      label: "Proxy host header",
+      kind: "string",
+      present: false,
+      configured: false,
       defaulted: false,
       presenceKnown: true,
     },
@@ -39,9 +214,35 @@ export const readyConfiguration = {
   capabilities: { editing: true, execution: true },
 } as const;
 
+export const creationRequiredConfiguration = {
+  state: "creation_required",
+  source: {
+    baseRevisionToken: source.baseRevisionToken,
+    configurationPath: "",
+    dotenvPaths: [],
+    runtimeManifestId: source.runtimeManifestId,
+  },
+  diagnostics: [],
+  capabilities: { editing: false, execution: false },
+} as const;
+
 export const unsupportedConfiguration = {
   ...readyConfiguration,
   state: "unsupported",
+  projection: readyConfiguration.projection.map((field) =>
+    field.fieldId === "account.server"
+      ? {
+          fieldId: field.fieldId,
+          bindings: field.bindings,
+          label: field.label,
+          kind: "string",
+          present: true,
+          configured: false,
+          defaulted: false,
+          presenceKnown: true,
+        }
+      : field,
+  ),
   diagnostics: [
     {
       code: "unsupported_provider",
@@ -71,8 +272,12 @@ export const unsupportedConfiguration = {
 
 export const recoveryConfiguration = {
   state: "recovery_required",
-  source,
+  source: {
+    ...source,
+    dotenvPaths: ["/srv/lego/cloudflare.env"],
+  },
   recovery: {
+    operation: "edit",
     phase: "replacing",
     state: "ambiguous",
     targets: [
@@ -107,6 +312,8 @@ export const recoveryConfiguration = {
 type ConfigurationMockOptions = {
   initial?: ConfigurationSnapshot;
   preview?: Record<string, unknown>;
+  creationPreview?: Record<string, unknown>;
+  created?: ConfigurationSnapshot;
   recovered?: ConfigurationSnapshot;
   recoveryFailure?: {
     code: "service_unavailable";
@@ -122,10 +329,14 @@ export async function mockConfiguration(
   let selected = options.initial ?? readyConfiguration;
   const observations: {
     previews: unknown[];
+    creationPreviews: unknown[];
+    creations: unknown[];
     recoveries: unknown[];
     saves: unknown[];
   } = {
     previews: [],
+    creationPreviews: [],
+    creations: [],
     recoveries: [],
     saves: [],
   };
@@ -161,6 +372,36 @@ export async function mockConfiguration(
     observations.previews.push(route.request().postDataJSON());
     await route.fulfill({
       body: JSON.stringify(options.preview),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+
+  await page.route(
+    "**/api/v1/configuration/creation-previews",
+    async (route) => {
+      if (route.request().method() !== "POST" || !options.creationPreview) {
+        await route.fulfill({ status: 405 });
+        return;
+      }
+      observations.creationPreviews.push(route.request().postDataJSON());
+      await route.fulfill({
+        body: JSON.stringify(options.creationPreview),
+        contentType: "application/json",
+        status: 200,
+      });
+    },
+  );
+
+  await page.route("**/api/v1/configuration/creation", async (route) => {
+    if (route.request().method() !== "PUT" || !options.created) {
+      await route.fulfill({ status: 405 });
+      return;
+    }
+    observations.creations.push(route.request().postDataJSON());
+    selected = options.created;
+    await route.fulfill({
+      body: JSON.stringify(selected),
       contentType: "application/json",
       status: 200,
     });

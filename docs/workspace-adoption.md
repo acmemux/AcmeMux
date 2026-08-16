@@ -1,6 +1,8 @@
 # Native workspace adoption
 
-AcmeMux adopts one existing native `lego` workspace. The native configuration,
+AcmeMux operates one native `lego` workspace. It can adopt an existing safe
+workspace or create the first complete supported configuration through the
+typed configuration screen. The native configuration,
 credential files, storage directory, certificate artifacts, and private keys
 remain authoritative on the host. AcmeMux records reviewed path evidence; it
 does not import those files into SQLite.
@@ -63,6 +65,14 @@ symbolic-link traversal, missing required objects, or insufficient service
 access blocks adoption. Directory write access is required only where the
 native role needs it, including atomic configuration replacement, storage, and
 webroot challenge files.
+
+First creation requires an existing safe working directory and pre-existing
+safe storage and webroot directories. Conventional mode creates only
+`.lego.yml` after proving both conventional names absent; explicit mode creates
+only the reviewed absolute target. Creation uses restrictive no-replace file
+activation and does not select the workspace until a fresh adoption inspection
+passes. Interrupted creation is recovered through the native configuration
+screen rather than by a second workspace-adoption attempt.
 
 The administrator acknowledges a fingerprint of the complete stable evidence.
 Volatile ancestor-directory link counts are audited internally but are not

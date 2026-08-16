@@ -43,6 +43,8 @@ type ConfigurationService interface {
 	Snapshot(context.Context) (configuration.View, error)
 	Preview(context.Context, string, []nativeconfig.Change) (configuration.Preview, error)
 	Save(context.Context, string, []nativeconfig.Change, string, workspace.CommitGuard) (configuration.View, error)
+	PreviewCreation(context.Context, string, configuration.CreationRequest) (configuration.Preview, error)
+	Create(context.Context, string, configuration.CreationRequest, string, workspace.CommitGuard) (configuration.View, error)
 	ResolveRecovery(context.Context, string, workspace.RecoveryResolution, workspace.CommitGuard) (configuration.View, error)
 }
 
@@ -76,6 +78,14 @@ type configurationRequest struct {
 type configurationRecoveryRequest struct {
 	BaseRevisionToken string
 	Resolution        workspace.RecoveryResolution
+}
+
+type configurationCreationRequest struct {
+	BaseRevisionToken    string
+	WorkingDirectory     string
+	ConfigurationPath    *string
+	Changes              []nativeconfig.Change
+	ReviewedPreviewToken string
 }
 
 type configurationSnapshot struct {
@@ -129,9 +139,10 @@ type configurationDiagnostic struct {
 }
 
 type configurationRecovery struct {
-	Phase   string                        `json:"phase"`
-	State   string                        `json:"state"`
-	Targets []configurationRecoveryTarget `json:"targets"`
+	Operation string                        `json:"operation"`
+	Phase     string                        `json:"phase"`
+	State     string                        `json:"state"`
+	Targets   []configurationRecoveryTarget `json:"targets"`
 }
 
 type configurationRecoveryTarget struct {
@@ -181,7 +192,77 @@ func (endpoints *configurationEndpoints) register(multiplexer *http.ServeMux) {
 	multiplexer.HandleFunc("GET /api/v1/configuration", endpoints.getConfiguration)
 	multiplexer.HandleFunc("POST /api/v1/configuration/previews", endpoints.previewConfiguration)
 	multiplexer.HandleFunc("PUT /api/v1/configuration", endpoints.saveConfiguration)
+	multiplexer.HandleFunc("POST /api/v1/configuration/creation-previews", endpoints.previewConfigurationCreation)
+	multiplexer.HandleFunc("PUT /api/v1/configuration/creation", endpoints.createConfiguration)
 	multiplexer.HandleFunc("PUT /api/v1/configuration/recovery", endpoints.resolveConfigurationRecovery)
+}
+
+func (endpoints *configurationEndpoints) previewConfigurationCreation(response http.ResponseWriter, request *http.Request) {
+	if _, ok := endpoints.authorize(response, request, true); !ok {
+		return
+	}
+	payload, ok := readConfigurationCreationRequest(response, request, false)
+	if !ok {
+		return
+	}
+	defer clearConfigurationChanges(payload.Changes)
+	configurationPath := ""
+	if payload.ConfigurationPath != nil {
+		configurationPath = *payload.ConfigurationPath
+	}
+	preview, err := endpoints.service.PreviewCreation(request.Context(), payload.BaseRevisionToken, configuration.CreationRequest{
+		WorkingDirectory: payload.WorkingDirectory, ConfigurationPath: configurationPath, Changes: payload.Changes,
+	})
+	if err != nil {
+		writeConfigurationServiceError(response, err)
+		return
+	}
+	presented, err := presentConfigurationPreview(preview)
+	if err != nil {
+		writeConfigurationUnavailable(response)
+		return
+	}
+	writeJSON(response, http.StatusOK, presented)
+}
+
+func (endpoints *configurationEndpoints) createConfiguration(response http.ResponseWriter, request *http.Request) {
+	authorization, ok := endpoints.authorize(response, request, true)
+	if !ok {
+		return
+	}
+	payload, ok := readConfigurationCreationRequest(response, request, true)
+	if !ok {
+		return
+	}
+	defer clearConfigurationChanges(payload.Changes)
+	configurationPath := ""
+	if payload.ConfigurationPath != nil {
+		configurationPath = *payload.ConfigurationPath
+	}
+	guardResponded := false
+	guard := func(context.Context) error {
+		if !endpoints.reauthorizeMutation(response, request, authorization) {
+			guardResponded = true
+			return errors.New("native configuration creation authorization failed")
+		}
+		return nil
+	}
+	view, err := endpoints.service.Create(request.Context(), payload.BaseRevisionToken, configuration.CreationRequest{
+		WorkingDirectory: payload.WorkingDirectory, ConfigurationPath: configurationPath, Changes: payload.Changes,
+	}, payload.ReviewedPreviewToken, guard)
+	if guardResponded {
+		return
+	}
+	if err != nil {
+		writeConfigurationServiceError(response, err)
+		return
+	}
+	presented, err := presentConfigurationSnapshot(view)
+	if err != nil {
+		writeConfigurationUnavailable(response)
+		return
+	}
+	writeJSON(response, http.StatusOK, presented)
 }
 
 func (endpoints *configurationEndpoints) resolveConfigurationRecovery(response http.ResponseWriter, request *http.Request) {
@@ -372,8 +453,13 @@ func presentConfigurationSnapshot(view configuration.View) (configurationSnapsho
 		if view.Recovery == nil {
 			return configurationSnapshot{}, errors.New("configuration recovery evidence is missing")
 		}
+		operation := "edit"
+		if view.Recovery.Bootstrap {
+			operation = "creation"
+		}
 		recovery := configurationRecovery{
-			Phase: string(view.Recovery.Phase), State: string(view.Recovery.State),
+			Operation: operation,
+			Phase:     string(view.Recovery.Phase), State: string(view.Recovery.State),
 			Targets: make([]configurationRecoveryTarget, 0, len(view.Recovery.Files)),
 		}
 		for _, file := range view.Recovery.Files {
@@ -382,6 +468,13 @@ func presentConfigurationSnapshot(view configuration.View) (configurationSnapsho
 			})
 		}
 		result.Recovery = &recovery
+		return result, nil
+	}
+	if view.State == configuration.StateCreationRequired {
+		if view.Recovery != nil || view.Source.ConfigurationPath != "" || len(view.Source.DotenvPaths) != 0 ||
+			view.Editing || view.Execution || len(view.Inspection.Projection) != 0 {
+			return configurationSnapshot{}, errors.New("configuration creation-required state is inconsistent")
+		}
 		return result, nil
 	}
 	projection, err := presentConfigurationProjection(view.Inspection.Projection)
@@ -731,6 +824,126 @@ func readConfigurationRequest(response http.ResponseWriter, request *http.Reques
 		clearConfigurationChanges(payload.Changes)
 		writeInvalidConfigurationRequest(response)
 		return configurationRequest{}, false
+	}
+	return payload, true
+}
+
+func readConfigurationCreationRequest(response http.ResponseWriter, request *http.Request, create bool) (configurationCreationRequest, bool) {
+	if !requireJSON(request) {
+		writeAPIError(response, http.StatusUnsupportedMediaType, "invalid_request", "A JSON request body is required.")
+		return configurationCreationRequest{}, false
+	}
+	request.Body = http.MaxBytesReader(response, request.Body, maximumConfigurationBodyBytes)
+	body, err := io.ReadAll(request.Body)
+	if err != nil {
+		writeConfigurationJSONError(response, err)
+		return configurationCreationRequest{}, false
+	}
+	defer clear(body)
+	if !utf8.Valid(body) {
+		writeInvalidConfigurationRequest(response)
+		return configurationCreationRequest{}, false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	opening, err := decoder.Token()
+	if err != nil {
+		writeInvalidConfigurationRequest(response)
+		return configurationCreationRequest{}, false
+	}
+	if delimiter, ok := opening.(json.Delim); !ok || delimiter != '{' {
+		writeInvalidConfigurationRequest(response)
+		return configurationCreationRequest{}, false
+	}
+	required := 4
+	if create {
+		required = 5
+	}
+	seen := make(map[string]struct{}, required)
+	var payload configurationCreationRequest
+	for decoder.More() {
+		rawKey, keyErr := decoder.Token()
+		key, keyOK := rawKey.(string)
+		if keyErr != nil || !keyOK {
+			clearConfigurationChanges(payload.Changes)
+			writeInvalidConfigurationRequest(response)
+			return configurationCreationRequest{}, false
+		}
+		if _, duplicate := seen[key]; duplicate {
+			clearConfigurationChanges(payload.Changes)
+			writeInvalidConfigurationRequest(response)
+			return configurationCreationRequest{}, false
+		}
+		seen[key] = struct{}{}
+		switch key {
+		case "baseRevisionToken":
+			if decoder.Decode(&payload.BaseRevisionToken) != nil {
+				clearConfigurationChanges(payload.Changes)
+				writeInvalidConfigurationRequest(response)
+				return configurationCreationRequest{}, false
+			}
+		case "workingDirectory":
+			if decoder.Decode(&payload.WorkingDirectory) != nil {
+				clearConfigurationChanges(payload.Changes)
+				writeInvalidConfigurationRequest(response)
+				return configurationCreationRequest{}, false
+			}
+		case "configurationPath":
+			if decoder.Decode(&payload.ConfigurationPath) != nil {
+				clearConfigurationChanges(payload.Changes)
+				writeInvalidConfigurationRequest(response)
+				return configurationCreationRequest{}, false
+			}
+		case "reviewedPreviewToken":
+			if !create || decoder.Decode(&payload.ReviewedPreviewToken) != nil {
+				clearConfigurationChanges(payload.Changes)
+				writeInvalidConfigurationRequest(response)
+				return configurationCreationRequest{}, false
+			}
+		case "changes":
+			var rawChanges []json.RawMessage
+			if decoder.Decode(&rawChanges) != nil || len(rawChanges) == 0 || len(rawChanges) > maximumConfigurationChanges {
+				clearRawMessages(rawChanges)
+				clearConfigurationChanges(payload.Changes)
+				writeInvalidConfigurationRequest(response)
+				return configurationCreationRequest{}, false
+			}
+			for _, raw := range rawChanges {
+				change, changeErr := decodeConfigurationChange(raw)
+				if changeErr != nil {
+					clearRawMessages(rawChanges)
+					clearConfigurationChanges(payload.Changes)
+					writeInvalidConfigurationRequest(response)
+					return configurationCreationRequest{}, false
+				}
+				payload.Changes = append(payload.Changes, change)
+			}
+			clearRawMessages(rawChanges)
+		default:
+			clearConfigurationChanges(payload.Changes)
+			writeInvalidConfigurationRequest(response)
+			return configurationCreationRequest{}, false
+		}
+	}
+	closing, closeErr := decoder.Token()
+	if closeErr != nil {
+		clearConfigurationChanges(payload.Changes)
+		writeInvalidConfigurationRequest(response)
+		return configurationCreationRequest{}, false
+	}
+	if delimiter, ok := closing.(json.Delim); !ok || delimiter != '}' || len(seen) != required {
+		clearConfigurationChanges(payload.Changes)
+		writeInvalidConfigurationRequest(response)
+		return configurationCreationRequest{}, false
+	}
+	if _, trailingErr := decoder.Token(); !errors.Is(trailingErr, io.EOF) ||
+		!configurationTokenPattern.MatchString(payload.BaseRevisionToken) ||
+		(create && !configurationTokenPattern.MatchString(payload.ReviewedPreviewToken)) ||
+		!validWorkspacePath(payload.WorkingDirectory) ||
+		(payload.ConfigurationPath != nil && !validWorkspacePath(*payload.ConfigurationPath)) {
+		clearConfigurationChanges(payload.Changes)
+		writeInvalidConfigurationRequest(response)
+		return configurationCreationRequest{}, false
 	}
 	return payload, true
 }

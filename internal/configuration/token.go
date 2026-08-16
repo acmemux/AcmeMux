@@ -102,6 +102,7 @@ func (service *Service) recoveryToken(runtimeFingerprint string, recovery worksp
 	writer.text(recovery.TransactionID)
 	writer.text(recovery.WorkingDirectory)
 	writer.text(recovery.ConfigurationPath)
+	writer.boolean(recovery.Bootstrap)
 	writer.text(string(recovery.Phase))
 	writer.text(string(recovery.State))
 	writer.integer(uint64(len(recovery.Files)))
@@ -111,6 +112,29 @@ func (service *Service) recoveryToken(runtimeFingerprint string, recovery worksp
 		writer.text(file.Path)
 		writer.text(string(file.State))
 	}
+	return writer.token()
+}
+
+func (service *Service) creationBaseToken(runtime runtimeContext) string {
+	writer := newTokenWriter(service.tokenKey, "acmemux-native-creation-base-v1")
+	writer.text(string(runtime.manifestID))
+	writer.text(runtime.fingerprint)
+	return writer.token()
+}
+
+func (service *Service) creationPreviewToken(
+	baseToken string,
+	request CreationRequest,
+	candidate []byte,
+	replacements []workspace.Replacement,
+	audit workspace.BootstrapAudit,
+) string {
+	writer := newTokenWriter(service.tokenKey, "acmemux-native-creation-preview-v1")
+	writer.text(baseToken)
+	writer.text(request.WorkingDirectory)
+	writer.text(request.ConfigurationPath)
+	writer.text(service.previewToken(baseToken, request.Changes, candidate, replacements))
+	writer.text(workspace.BootstrapFingerprint(audit))
 	return writer.token()
 }
 

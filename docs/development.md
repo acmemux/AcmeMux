@@ -46,6 +46,10 @@ checks use an explicit qualified path through `ACMEMUX_TEST_LEGO`.
 The native configuration boundary also has focused package suites:
 
 ```sh
+make test-integrations
+make test-nativeconfig
+make test-configuration
+
 go test ./internal/integrations/... \
   ./internal/nativeconfig/... \
   ./internal/dotenv/... \

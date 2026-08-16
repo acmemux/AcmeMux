@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import { AppShell } from "./AppShell";
 import {
   browserRuntimeClient,
@@ -89,6 +91,7 @@ export function OverviewPage({
   runtimeClient?: RuntimeClient;
   workspaceClient?: WorkspaceClient;
 } = {}) {
+  const creationWasRequired = useRef(false);
   const runtime = useRuntimeController(runtimeClient);
   const runtimeCandidateInvalidates = runtimeCandidateInvalidatesCurrent(
     runtime.snapshot,
@@ -111,6 +114,7 @@ export function OverviewPage({
     runtimeSnapshotReady,
     runtimeInteractionsEnabled,
   );
+  const refreshWorkspace = workspace.refresh;
   const workspaceBlocksRuntime = workspace.runtimeRecheckRequired;
   const runtimeReady = runtimeSnapshotReady && !workspaceBlocksRuntime;
   const signal = workspaceBlocksRuntime
@@ -130,9 +134,14 @@ export function OverviewPage({
     workspace.snapshot?.state === "ready" &&
     !workspaceCandidateInvalidates &&
     workspace.error === null;
-  const configurationActivationKey = workspaceReady
-    ? `${workspace.requestRevision}:ready`
-    : null;
+  const configurationActivationKey =
+    runtimeReady && workspace.phase === "idle" && workspace.error === null
+      ? [
+          runtime.requestRevision,
+          workspace.requestRevision,
+          workspace.snapshot?.state ?? "unadopted",
+        ].join(":")
+      : null;
   const configuration = useConfigurationController(
     configurationClient,
     configurationActivationKey,
@@ -141,16 +150,40 @@ export function OverviewPage({
   const configurationRecoveryPending =
     configuration.phase === "idle" &&
     configuration.snapshot?.state === "recovery_required";
+  const configurationMutationPending = configuration.mutationPhase !== "idle";
   const configurationInteractionsEnabled =
     runtimeInteractionsEnabled &&
     workspace.phase === "idle" &&
-    configuration.phase === "idle";
+    configuration.phase === "idle" &&
+    !configurationMutationPending;
   const nativeMutationsEnabled =
     configurationInteractionsEnabled && !configurationRecoveryPending;
   const configurationExecutionReady =
     configuration.phase === "idle" &&
     configuration.error === null &&
     configuration.snapshot?.capabilities.execution === true;
+
+  useEffect(() => {
+    if (configuration.snapshot?.state === "creation_required") {
+      creationWasRequired.current = true;
+      return;
+    }
+    if (
+      creationWasRequired.current &&
+      configuration.snapshot?.state === "ready" &&
+      workspace.snapshot?.state === "unadopted" &&
+      workspace.phase === "idle"
+    ) {
+      creationWasRequired.current = false;
+      void refreshWorkspace();
+    }
+  }, [
+    configuration.requestRevision,
+    configuration.snapshot?.state,
+    workspace.phase,
+    refreshWorkspace,
+    workspace.snapshot?.state,
+  ]);
   const showWorkspace =
     runtimeReady ||
     workspace.phase === "loading" ||
@@ -228,6 +261,7 @@ export function OverviewPage({
           externallyBusy={
             workspace.phase !== "idle" ||
             configuration.phase !== "idle" ||
+            configurationMutationPending ||
             configurationRecoveryPending
           }
           trustBlocked={workspaceBlocksRuntime}

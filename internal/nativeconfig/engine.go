@@ -106,6 +106,17 @@ func (e *Engine) RuntimeID() compatibility.ManifestID { return e.runtimeID }
 func (e *Engine) ManifestID() integrations.ManifestID { return e.manifest.ID() }
 
 func (e *Engine) Inspect(source []byte) (Inspection, error) {
+	return e.inspect(source, false)
+}
+
+// InspectCreation applies registration-time prerequisites in addition to the
+// ordinary adopted-workspace contract. Existing registered native accounts
+// legitimately may no longer retain their EAB or terms inputs.
+func (e *Engine) InspectCreation(source []byte) (Inspection, error) {
+	return e.inspect(source, true)
+}
+
+func (e *Engine) inspect(source []byte, creation bool) (Inspection, error) {
 	document, err := parseDocument(source, e.limits)
 	if err != nil {
 		return Inspection{}, err
@@ -117,10 +128,14 @@ func (e *Engine) Inspect(source []byte) (Inspection, error) {
 	schemaIssues := e.validateSchema(document, instance)
 	schemaValid := len(schemaIssues) == 0
 	semanticIssues := []Issue(nil)
+	constraintIssues := []Issue(nil)
 	semanticValid := false
 	if schemaValid {
 		semanticIssues = validateSemantics(document, e.limits.MaxIssues)
 		semanticValid = len(semanticIssues) == 0
+		if semanticValid && e.manifest.ID() == integrations.CoreManifestID {
+			constraintIssues = validateCoreConstraints(document, e.limits.MaxIssues, creation)
+		}
 	}
 	projection, routes, classification, projectionOverflow := e.projectAndClassify(document)
 	if projectionOverflow {
@@ -128,8 +143,8 @@ func (e *Engine) Inspect(source []byte) (Inspection, error) {
 			Code: ErrorStructureComplex, Detail: "configuration projection exceeds the bounded field limit",
 		}
 	}
-	issues := make([]Issue, 0, min(e.limits.MaxIssues, len(schemaIssues)+len(semanticIssues)+len(classification)))
-	for _, group := range [][]Issue{schemaIssues, semanticIssues, classification} {
+	issues := make([]Issue, 0, min(e.limits.MaxIssues, len(schemaIssues)+len(semanticIssues)+len(constraintIssues)+len(classification)))
+	for _, group := range [][]Issue{schemaIssues, semanticIssues, constraintIssues, classification} {
 		for _, issue := range group {
 			issues = appendIssue(issues, e.limits.MaxIssues, issue)
 		}
@@ -301,6 +316,24 @@ func (e *Engine) Preview(source []byte, changes []Change) (*Candidate, error) {
 	if err != nil {
 		return nil, err
 	}
+	if e.manifest.ID() == integrations.CoreManifestID {
+		baseDocument, baseErr := parseDocument(source, e.limits)
+		candidateDocument, candidateErr := parseDocument(candidateYAML, e.limits)
+		if baseErr != nil || candidateErr != nil {
+			return nil, &Error{Code: ErrorMalformedYAML, Detail: "configuration transition could not be inspected"}
+		}
+		for _, issue := range validateCoreTransition(
+			baseDocument,
+			candidateDocument,
+			coreEABReplacements(prepared),
+			e.limits.MaxIssues-len(inspection.Issues),
+		) {
+			inspection.Issues = append(inspection.Issues, issue)
+			if issue.BlocksExecution {
+				inspection.Executable = false
+			}
+		}
+	}
 	if len(external) > 0 {
 		presence := make([]DotenvPresence, len(external))
 		for index, change := range external {
@@ -316,6 +349,34 @@ func (e *Engine) Preview(source []byte, changes []Change) (*Candidate, error) {
 		yaml: candidateYAML, SourceSHA256: digest(source), CandidateSHA256: digest(candidateYAML),
 		Changed: changed, Inspection: inspection, Summary: summary, external: external,
 	}, nil
+}
+
+func coreEABReplacements(changes []preparedChange) map[string]bool {
+	const (
+		kidSet = 1 << iota
+		hmacSet
+	)
+	sets := make(map[string]int)
+	for _, change := range changes {
+		if change.op != OperationSet {
+			continue
+		}
+		account := change.values[integrations.BindingAccount]
+		if account == "" {
+			continue
+		}
+		switch change.spec.ID() {
+		case integrations.FieldAccountEABKID:
+			sets[account] |= kidSet
+		case integrations.FieldAccountEABHMACKey:
+			sets[account] |= hmacSet
+		}
+	}
+	result := make(map[string]bool, len(sets))
+	for account, fields := range sets {
+		result[account] = fields == kidSet|hmacSet
+	}
+	return result
 }
 
 func normalizeBindings(spec integrations.FieldSpec, supplied []Binding) (map[integrations.BindingID]string, []Binding, error) {
@@ -350,7 +411,16 @@ func (e *Engine) applyYAMLChange(document *yaml.Node, change preparedChange) (*y
 			change.spec.Sensitivity() == integrations.SensitivitySecret,
 		)
 	case OperationRemove:
-		return removeNodeAtPath(document, change.path)
+		preserveDepth := len(change.path) - 1
+		if change.spec.PruneEmptyParents() {
+			preserveDepth = 0
+			for index, segment := range change.spec.Selector() {
+				if _, bound := segment.Binding(); bound {
+					preserveDepth = index + 1
+				}
+			}
+		}
+		return removeNodeAtPath(document, change.path, preserveDepth)
 	default:
 		return nil, false, &Error{Code: ErrorInvalidChange, Detail: "field operation is invalid"}
 	}

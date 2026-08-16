@@ -99,6 +99,8 @@ const readyConfigurationClient: ConfigurationClient = {
   })),
   previewChanges: vi.fn(),
   saveChanges: vi.fn(),
+  previewCreation: vi.fn(),
+  createConfiguration: vi.fn(),
   resolveRecovery: vi.fn(),
 };
 
@@ -448,7 +450,11 @@ describe("workspace adoption", () => {
     );
 
     await screen.findByText("Certificate inventory unavailable");
-    fireEvent.click(screen.getByRole("button", { name: "Inspect executable" }));
+    const inspectRuntime = screen.getByRole("button", {
+      name: "Inspect executable",
+    });
+    await waitFor(() => expect(inspectRuntime).toBeEnabled());
+    fireEvent.click(inspectRuntime);
     await waitFor(() =>
       expect(runtimeClient.inspectCandidate).toHaveBeenCalledTimes(1),
     );
@@ -1382,11 +1388,11 @@ describe("workspace adoption", () => {
     expect(
       await screen.findByText("Certificate inventory unavailable"),
     ).toBeInTheDocument();
-    await act(async () =>
-      fireEvent.click(
-        screen.getByRole("button", { name: "Check workspace again" }),
-      ),
-    );
+    const retry = screen.getByRole("button", {
+      name: "Check workspace again",
+    });
+    await waitFor(() => expect(retry).toBeEnabled());
+    await act(async () => fireEvent.click(retry));
 
     await waitFor(() => expect(getWorkspace).toHaveBeenCalledTimes(2));
     expect(
@@ -1527,9 +1533,11 @@ describe("workspace adoption", () => {
     expect(await screen.findByText(title)).toBeInTheDocument();
     expect(screen.getByText(code)).toBeInTheDocument();
     expect(screen.getByText("Setup incomplete")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Check workspace again" }),
-    ).toBeEnabled();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Check workspace again" }),
+      ).toBeEnabled(),
+    );
   });
 
   it("validates host paths before inspection", async () => {

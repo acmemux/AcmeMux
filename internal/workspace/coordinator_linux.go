@@ -213,7 +213,7 @@ func openWorkspaceLock(path string) (*os.File, error) {
 func validPurpose(purpose Purpose) bool {
 	switch purpose {
 	case PurposeRead, PurposePreview, PurposeSave, PurposeInventory,
-		PurposeManualRun, PurposeScheduled, PurposeRecovery:
+		PurposeManualRun, PurposeScheduled, PurposeRecovery, PurposeBootstrap:
 		return true
 	default:
 		return false

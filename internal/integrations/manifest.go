@@ -38,8 +38,13 @@ type FieldDefinition struct {
 	// addresses the YAML envFile scalar whose resolved file owns EnvironmentKey.
 	Selector       []SelectorSegment
 	EnvironmentKey string
-	Default        *Value
-	Rules          Rules
+	// PruneEmptyParents removes empty structural mappings below the last
+	// binding after a leaf removal. It is reserved for native objects such as
+	// EAB whose empty mapping is schema-invalid; most empty native objects carry
+	// defaults and must remain intact.
+	PruneEmptyParents bool
+	Default           *Value
+	Rules             Rules
 }
 
 // FieldSpec is an immutable logical-to-native mapping.
@@ -52,6 +57,7 @@ type FieldSpec struct {
 	disposition    Disposition
 	selector       []SelectorSegment
 	environmentKey string
+	pruneEmpty     bool
 	bindings       []BindingID
 	defaultVal     *Value
 	rules          Rules
@@ -143,6 +149,7 @@ func NewFieldSpec(definition FieldDefinition) (FieldSpec, error) {
 		disposition:    definition.Disposition,
 		selector:       slices.Clone(definition.Selector),
 		environmentKey: definition.EnvironmentKey,
+		pruneEmpty:     definition.PruneEmptyParents,
 		bindings:       bindings,
 		defaultVal:     defaultValue,
 		rules:          definition.Rules.clone(),
@@ -185,6 +192,7 @@ func (s FieldSpec) Target() FieldTarget         { return s.target }
 func (s FieldSpec) Sensitivity() Sensitivity    { return s.sensitivity }
 func (s FieldSpec) Disposition() Disposition    { return s.disposition }
 func (s FieldSpec) Editable() bool              { return s.disposition == DispositionManaged }
+func (s FieldSpec) PruneEmptyParents() bool     { return s.pruneEmpty }
 func (s FieldSpec) BindingIDs() []BindingID     { return slices.Clone(s.bindings) }
 func (s FieldSpec) Selector() []SelectorSegment { return slices.Clone(s.selector) }
 func (s FieldSpec) EnvironmentKey() (string, bool) {
@@ -210,7 +218,7 @@ func (s FieldSpec) Match(path []string) (map[BindingID]string, bool) {
 			}
 			continue
 		}
-		if !validYAMLKey(path[index]) {
+		if !validBindingValue(path[index]) {
 			return nil, false
 		}
 		bindings[segment.binding] = path[index]
@@ -227,7 +235,7 @@ func (s FieldSpec) HasPathPrefix(path []string) bool {
 	}
 	for index := range path {
 		segment := s.selector[index]
-		if segment.key != "" && segment.key != path[index] || segment.binding != "" && !validYAMLKey(path[index]) {
+		if segment.key != "" && segment.key != path[index] || segment.binding != "" && !validBindingValue(path[index]) {
 			return false
 		}
 	}
@@ -247,7 +255,7 @@ func (s FieldSpec) Resolve(bindings map[BindingID]string) ([]string, error) {
 			continue
 		}
 		value, ok := bindings[segment.binding]
-		if !ok || !validYAMLKey(value) {
+		if !ok || !validBindingValue(value) {
 			return nil, fmt.Errorf("field binding is missing or invalid")
 		}
 		path[index] = value

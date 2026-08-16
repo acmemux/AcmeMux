@@ -1,6 +1,7 @@
 package nativeconfig
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -121,6 +122,10 @@ func (e *Engine) projectAndClassify(document *yaml.Node) ([]ProjectedField, []Do
 	issues := make([]Issue, 0)
 	seenProjection := make(map[string]struct{})
 	projectionOverflow := false
+	unsupportedHTTPBindings := unsupportedHTTPChallengeBindings(document.Content[0])
+	unsupportedCertificates := unsupportedCertificateBindings(document.Content[0])
+	implicitUnsupportedChallenges := implicitUnsupportedCertificateChallenges(document.Content[0], unsupportedHTTPBindings)
+	implicitHTTPBindings := implicitHTTPChallengeBindings(document.Content[0])
 
 	var walk func(*yaml.Node, []string, bool)
 	walk = func(node *yaml.Node, path []string, unsupportedAncestor bool) {
@@ -145,7 +150,9 @@ func (e *Engine) projectAndClassify(document *yaml.Node) ([]ProjectedField, []Do
 			yamlSpec, yamlBindings, yamlManaged := e.manifest.MatchTarget(childPath, integrations.TargetYAML)
 			dotenvMatches := e.matchingFields(childPath, integrations.TargetDotenv)
 			if yamlManaged {
-				if projected, ok, supported := projectedFromNode(yamlSpec, yamlBindings, value); ok {
+				suppressProjection := suppressUnsupportedHTTPProjection(yamlSpec, yamlBindings, unsupportedHTTPBindings) ||
+					suppressUnsupportedCertificateProjection(yamlSpec, yamlBindings, unsupportedCertificates)
+				if projected, ok, supported := projectedFromNode(yamlSpec, yamlBindings, value); ok && !suppressProjection {
 					projectionIdentity := projectionKey(projected.FieldID, projected.Bindings)
 					if !supported {
 						projected.Configured = false
@@ -230,30 +237,62 @@ func (e *Engine) projectAndClassify(document *yaml.Node) ([]ProjectedField, []Do
 	walk(document.Content[0], nil, false)
 
 	for _, spec := range e.manifest.Fields() {
-		if len(spec.BindingIDs()) != 0 {
-			continue
-		}
-		key := projectionKey(spec.ID(), nil)
-		if _, present := seenProjection[key]; present {
-			continue
-		}
-		if len(projection) >= e.limits.MaxProjectionFields {
-			projectionOverflow = true
-			continue
-		}
-		field := ProjectedField{
-			FieldID: spec.ID(), Label: spec.Label(), Kind: spec.Kind(),
-			Secret: spec.Sensitivity() == integrations.SensitivitySecret,
-		}
-		if value, ok := spec.Default(); ok {
-			field.Defaulted = true
-			field.Configured = true
-			if !field.Secret {
-				field.value = value
-				field.hasValue = true
+		bindingSets := bindingSetsForSpec(document.Content[0], spec)
+		if isHTTPChallengeSpec(spec) {
+			for _, challenge := range implicitHTTPBindings {
+				bindings := []Binding{{ID: integrations.BindingChallenge, Value: challenge}}
+				if !slices.ContainsFunc(bindingSets, func(existing []Binding) bool {
+					return slices.Equal(existing, bindings)
+				}) {
+					bindingSets = append(bindingSets, bindings)
+				}
 			}
 		}
-		projection = append(projection, field)
+		if len(spec.BindingIDs()) == 0 {
+			bindingSets = [][]Binding{nil}
+		}
+		for _, bindings := range bindingSets {
+			bindingValues := make(map[integrations.BindingID]string, len(bindings))
+			for _, binding := range bindings {
+				bindingValues[binding.ID] = binding.Value
+			}
+			if suppressUnsupportedHTTPProjection(spec, bindingValues, unsupportedHTTPBindings) ||
+				suppressUnsupportedCertificateProjection(spec, bindingValues, unsupportedCertificates) {
+				continue
+			}
+			key := projectionKey(spec.ID(), bindings)
+			if _, present := seenProjection[key]; present {
+				continue
+			}
+			if len(projection) >= e.limits.MaxProjectionFields {
+				projectionOverflow = true
+				continue
+			}
+			field := ProjectedField{
+				FieldID: spec.ID(), Bindings: bindings, Label: spec.Label(), Kind: spec.Kind(),
+				PresenceKnown: spec.Target() == integrations.TargetYAML,
+				Secret:        spec.Sensitivity() == integrations.SensitivitySecret,
+			}
+			if spec.ID() == integrations.FieldCertificateChallenge {
+				certificate := bindingValues[integrations.BindingCertificate]
+				if challenge, defaulted := implicitUnsupportedChallenges[certificate]; defaulted {
+					field.Defaulted = true
+					field.Configured = true
+					field.value = integrations.StringValue(challenge)
+					field.hasValue = true
+				}
+			}
+			if value, ok := spec.Default(); ok {
+				field.Defaulted = true
+				field.Configured = true
+				if !field.Secret {
+					field.value = value
+					field.hasValue = true
+				}
+			}
+			projection = append(projection, field)
+			seenProjection[key] = struct{}{}
+		}
 	}
 
 	sort.Slice(projection, func(left, right int) bool {
@@ -263,6 +302,221 @@ func (e *Engine) projectAndClassify(document *yaml.Node) ([]ProjectedField, []Do
 		return projectionKey(routes[left].fieldID, routes[left].bindings) < projectionKey(routes[right].fieldID, routes[right].bindings)
 	})
 	return projection, routes, issues, projectionOverflow
+}
+
+// unsupportedHTTPChallengeBindings identifies native challenge containers
+// whose effective provider is outside the core HTTP listener/webroot
+// contract. Managed HTTP leaves under those containers remain preserved but
+// are not projected, so absent defaults cannot look editable or be submitted
+// by a full-form client during an unrelated change.
+func unsupportedHTTPChallengeBindings(root *yaml.Node) map[string]struct{} {
+	result := make(map[string]struct{})
+	challenges, _, ok := mappingValue(root, "challenges")
+	if !ok || challenges.Kind != yaml.MappingNode {
+		return result
+	}
+	for index := 0; index+1 < len(challenges.Content); index += 2 {
+		name, challenge := challenges.Content[index].Value, challenges.Content[index+1]
+		if challenge.Kind != yaml.MappingNode {
+			continue
+		}
+		unsupported := false
+		for _, key := range []string{"tls", "dns", "dnsPersist"} {
+			if _, _, present := mappingValue(challenge, key); present {
+				unsupported = true
+			}
+		}
+		if http, _, present := mappingValue(challenge, "http"); present && http.Kind == yaml.MappingNode {
+			for _, key := range []string{"memcachedHosts", "s3Bucket"} {
+				if _, _, configured := mappingValue(http, key); configured {
+					unsupported = true
+				}
+			}
+		}
+		if unsupported {
+			result[name] = struct{}{}
+		}
+	}
+	return result
+}
+
+func suppressUnsupportedHTTPProjection(
+	spec integrations.FieldSpec,
+	bindings map[integrations.BindingID]string,
+	unsupported map[string]struct{},
+) bool {
+	challenge, bound := bindings[integrations.BindingChallenge]
+	if !bound {
+		return false
+	}
+	if _, blocked := unsupported[challenge]; !blocked {
+		return false
+	}
+	return isHTTPChallengeSpec(spec)
+}
+
+func isHTTPChallengeSpec(spec integrations.FieldSpec) bool {
+	selector := spec.Selector()
+	if len(selector) < 3 {
+		return false
+	}
+	first, firstOK := selector[0].Key()
+	binding, bindingOK := selector[1].Binding()
+	third, thirdOK := selector[2].Key()
+	return firstOK && first == "challenges" && bindingOK && binding == integrations.BindingChallenge &&
+		thirdOK && third == "http"
+}
+
+func implicitHTTPChallengeBindings(root *yaml.Node) []string {
+	if challenges, _, present := mappingValue(root, "challenges"); present {
+		if _, _, configured := mappingValue(challenges, "http-01"); configured {
+			return nil
+		}
+	}
+	certificates, _, ok := mappingValue(root, "certificates")
+	if !ok || certificates.Kind != yaml.MappingNode {
+		return nil
+	}
+	unsupportedCertificates := unsupportedCertificateBindings(root)
+	for index := 1; index < len(certificates.Content); index += 2 {
+		name := certificates.Content[index-1].Value
+		certificate := certificates.Content[index]
+		if _, unsupported := unsupportedCertificates[name]; unsupported {
+			continue
+		}
+		challenge, _, present := mappingValue(certificate, "challenge")
+		if present && challenge.Kind == yaml.ScalarNode && challenge.Value == "http-01" {
+			return []string{"http-01"}
+		}
+	}
+	return nil
+}
+
+func unsupportedCertificateBindings(root *yaml.Node) map[string]struct{} {
+	result := make(map[string]struct{})
+	certificates, _, ok := mappingValue(root, "certificates")
+	if !ok || certificates.Kind != yaml.MappingNode {
+		return result
+	}
+	for index := 0; index+1 < len(certificates.Content); index += 2 {
+		name, certificate := certificates.Content[index].Value, certificates.Content[index+1]
+		if certificate.Kind != yaml.MappingNode {
+			continue
+		}
+		_, _, csr := mappingValue(certificate, "csr")
+		_, _, pfx := mappingValue(certificate, "pfx")
+		if csr || pfx {
+			result[name] = struct{}{}
+		}
+	}
+	return result
+}
+
+func implicitUnsupportedCertificateChallenges(root *yaml.Node, unsupportedChallenges map[string]struct{}) map[string]string {
+	result := make(map[string]string)
+	challenges, _, ok := mappingValue(root, "challenges")
+	if !ok || challenges.Kind != yaml.MappingNode || len(challenges.Content) != 2 {
+		return result
+	}
+	challenge := challenges.Content[0].Value
+	if _, unsupported := unsupportedChallenges[challenge]; !unsupported {
+		return result
+	}
+	certificates, _, ok := mappingValue(root, "certificates")
+	if !ok || certificates.Kind != yaml.MappingNode {
+		return result
+	}
+	unsupportedCertificates := unsupportedCertificateBindings(root)
+	for index := 0; index+1 < len(certificates.Content); index += 2 {
+		name, certificate := certificates.Content[index].Value, certificates.Content[index+1]
+		if certificate.Kind != yaml.MappingNode {
+			continue
+		}
+		if _, unsupported := unsupportedCertificates[name]; unsupported {
+			continue
+		}
+		if _, _, configured := mappingValue(certificate, "challenge"); !configured {
+			result[name] = challenge
+		}
+	}
+	return result
+}
+
+func suppressUnsupportedCertificateProjection(
+	spec integrations.FieldSpec,
+	bindings map[integrations.BindingID]string,
+	unsupported map[string]struct{},
+) bool {
+	certificate, bound := bindings[integrations.BindingCertificate]
+	if !bound {
+		return false
+	}
+	if _, blocked := unsupported[certificate]; !blocked {
+		return false
+	}
+	selector := spec.Selector()
+	if len(selector) < 2 {
+		return false
+	}
+	first, firstOK := selector[0].Key()
+	binding, bindingOK := selector[1].Binding()
+	return firstOK && first == "certificates" && bindingOK && binding == integrations.BindingCertificate
+}
+
+// bindingSetsForSpec enumerates entity identities at the last trusted binding
+// selector, independent of whether the optional leaf itself exists. This
+// lets forms render absent/defaulted fields for an existing named account,
+// challenge, or certificate without accepting a browser-supplied YAML path.
+func bindingSetsForSpec(root *yaml.Node, spec integrations.FieldSpec) [][]Binding {
+	selector := spec.Selector()
+	lastBinding := -1
+	for index, segment := range selector {
+		if _, ok := segment.Binding(); ok {
+			lastBinding = index
+		}
+	}
+	if lastBinding < 0 {
+		return nil
+	}
+	selector = selector[:lastBinding+1]
+	result := make([][]Binding, 0)
+	values := make(map[integrations.BindingID]string, len(spec.BindingIDs()))
+	var walk func(*yaml.Node, int)
+	walk = func(node *yaml.Node, index int) {
+		if index == len(selector) {
+			if _, err := spec.Resolve(values); err != nil {
+				return
+			}
+			result = append(result, orderedBindings(spec, values))
+			return
+		}
+		if node == nil || node.Kind != yaml.MappingNode {
+			return
+		}
+		segment := selector[index]
+		if key, ok := segment.Key(); ok {
+			child, _, present := mappingValue(node, key)
+			if present {
+				walk(child, index+1)
+			}
+			return
+		}
+		binding, ok := segment.Binding()
+		if !ok {
+			return
+		}
+		for childIndex := 0; childIndex+1 < len(node.Content); childIndex += 2 {
+			key, child := node.Content[childIndex], node.Content[childIndex+1]
+			if key.Kind != yaml.ScalarNode {
+				continue
+			}
+			values[binding] = key.Value
+			walk(child, index+1)
+			delete(values, binding)
+		}
+	}
+	walk(root, 0)
+	return result
 }
 
 func notableUnsupportedPath(path []string) bool {

@@ -165,9 +165,10 @@ func (manager *TransactionManager) prepareJournal(
 	prepared := make([]preparedReplacement, 0, len(replacements))
 	journal := Journal{
 		TransactionID: transactionID, Phase: JournalStaging,
-		WorkingDirectory:  sources.Selection.Review.WorkingDirectory.Path,
-		ConfigurationPath: sources.Selection.Review.Configuration.Path,
-		CreatedAt:         manager.now().UTC(),
+		WorkingDirectory:    sources.Selection.Review.WorkingDirectory.Path,
+		ConfigurationPath:   sources.Selection.Review.Configuration.Path,
+		ConfigurationSource: sources.Selection.Review.ConfigurationSource,
+		CreatedAt:           manager.now().UTC(),
 	}
 	for index, replacement := range replacements {
 		parent, parentID, err := manager.openReplacementParent(ctx, replacement.Path)

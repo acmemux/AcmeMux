@@ -10,6 +10,7 @@ import {
 import { mockWorkspace } from "./support/workspace";
 import { readyWorkspace } from "./support/workspace";
 import {
+  creationRequiredConfiguration,
   mockConfiguration,
   recoveryConfiguration,
   unsupportedConfiguration,
@@ -237,6 +238,7 @@ test.describe("application accessibility", () => {
   });
 
   for (const [name, configuration] of [
+    ["creation", creationRequiredConfiguration],
     ["unsupported", unsupportedConfiguration],
     ["recovery", recoveryConfiguration],
   ] as const) {

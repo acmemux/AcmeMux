@@ -28,7 +28,7 @@ func (manager *TransactionManager) InspectRecovery(ctx context.Context, lease *L
 	}
 	recovery := Recovery{
 		TransactionID: journal.TransactionID, WorkingDirectory: journal.WorkingDirectory,
-		ConfigurationPath: journal.ConfigurationPath, Phase: journal.Phase,
+		ConfigurationPath: journal.ConfigurationPath, Bootstrap: journal.Bootstrap, Phase: journal.Phase,
 	}
 	applied, unapplied, ambiguous := 0, 0, 0
 	for _, file := range journal.Files {
@@ -116,135 +116,180 @@ func (manager *TransactionManager) ResolveRecovery(
 	resolution RecoveryResolution,
 	guard CommitGuard,
 	validator RecoveryValidator,
-) (Selection, error) {
+) (RecoveryResult, error) {
 	if err := manager.ready(ctx, lease); err != nil {
-		return Selection{}, err
+		return RecoveryResult{}, err
 	}
 	ctx, cancel := manager.boundedContext(ctx)
 	defer cancel()
 	if guard == nil {
-		return Selection{}, fmt.Errorf("%w: recovery commit guard is required", ErrInvalidEdit)
+		return RecoveryResult{}, fmt.Errorf("%w: recovery commit guard is required", ErrInvalidEdit)
 	}
 	recovery, err := manager.InspectRecovery(ctx, lease)
 	if err != nil {
-		return Selection{}, err
+		return RecoveryResult{}, err
 	}
 	journal, err := manager.journal.Load(ctx)
 	if err != nil || journal.TransactionID != recovery.TransactionID {
-		return Selection{}, fmt.Errorf("%w: recovery journal changed", ErrSourceChanged)
+		return RecoveryResult{}, fmt.Errorf("%w: recovery journal changed", ErrSourceChanged)
 	}
 	switch resolution {
 	case ResolutionDiscardUnapplied:
 		if recovery.State != RecoveryUnapplied {
-			return Selection{}, fmt.Errorf("%w: only a wholly unapplied edit can be discarded", ErrInvalidEdit)
+			return RecoveryResult{}, fmt.Errorf("%w: only a wholly unapplied edit can be discarded", ErrInvalidEdit)
+		}
+		if journal.Bootstrap {
+			return manager.discardBootstrapRecovery(ctx, lease, journal, guard)
 		}
 		selection, err := manager.selections.Load(ctx)
 		if err != nil {
-			return Selection{}, err
+			return RecoveryResult{}, err
 		}
 		if _, err := manager.inspector.Verify(ctx, selection.Review); err != nil {
-			return Selection{}, fmt.Errorf("%w: active workspace changed before discard", ErrSourceChanged)
+			return RecoveryResult{}, fmt.Errorf("%w: active workspace changed before discard", ErrSourceChanged)
 		}
 		if err := guard(ctx); err != nil {
-			return Selection{}, err
+			return RecoveryResult{}, err
 		}
 		if err := manager.removeRecoveryStages(ctx, journal, false); err != nil {
-			return Selection{}, fmt.Errorf("%w: %w", ErrRecoveryRequired, err)
+			return RecoveryResult{}, fmt.Errorf("%w: %w", ErrRecoveryRequired, err)
 		}
 		if _, err := manager.inspector.Verify(ctx, selection.Review); err != nil {
-			return Selection{}, fmt.Errorf("%w: active workspace changed during discard", ErrSourceChanged)
+			return RecoveryResult{}, fmt.Errorf("%w: active workspace changed during discard", ErrSourceChanged)
 		}
 		if err := manager.journal.Clear(ctx, journal.TransactionID); err != nil {
-			return Selection{}, fmt.Errorf("%w: clear discarded edit", ErrRecoveryRequired)
+			return RecoveryResult{}, fmt.Errorf("%w: clear discarded edit", ErrRecoveryRequired)
 		}
-		return selection, nil
+		return RecoveryResult{Selection: selection, SelectionPresent: true}, nil
 	case ResolutionFinalizeApplied:
 		if recovery.State != RecoveryApplied {
-			return Selection{}, fmt.Errorf("%w: edit is not wholly applied", ErrInvalidEdit)
+			return RecoveryResult{}, fmt.Errorf("%w: edit is not wholly applied", ErrInvalidEdit)
+		}
+		if journal.Bootstrap {
+			return RecoveryResult{}, fmt.Errorf("%w: applied bootstrap requires explicit current-workspace adoption", ErrInvalidEdit)
 		}
 	case ResolutionAdoptCurrent:
 		// Explicitly accepts a current set repaired outside AcmeMux; it never
 		// moves an unapplied stage into an active path.
 		if recovery.State != RecoveryApplied && recovery.State != RecoveryPartial && recovery.State != RecoveryAmbiguous {
-			return Selection{}, fmt.Errorf("%w: only an applied, partial, or ambiguous edit can adopt current files", ErrInvalidEdit)
+			return RecoveryResult{}, fmt.Errorf("%w: only an applied, partial, or ambiguous edit can adopt current files", ErrInvalidEdit)
 		}
 	default:
-		return Selection{}, fmt.Errorf("%w: recovery resolution is unknown", ErrInvalidEdit)
+		return RecoveryResult{}, fmt.Errorf("%w: recovery resolution is unknown", ErrInvalidEdit)
 	}
 	if validator == nil {
-		return Selection{}, fmt.Errorf("%w: recovery validator is required", ErrInvalidEdit)
+		return RecoveryResult{}, fmt.Errorf("%w: recovery validator is required", ErrInvalidEdit)
 	}
 	validated, sources, err := manager.readRecoveryCurrent(ctx, journal)
 	if err != nil {
-		return Selection{}, err
+		return RecoveryResult{}, err
 	}
 	defer sources.Close()
-	prior, err := manager.selections.Load(ctx)
-	if err != nil {
-		return Selection{}, err
+	var prior Selection
+	if !journal.Bootstrap {
+		prior, err = manager.selections.Load(ctx)
+		if err != nil {
+			return RecoveryResult{}, err
+		}
 	}
 	if resolution == ResolutionFinalizeApplied && !samePreEditRecoveryBoundary(prior.Review, validated.Review, journal) {
-		return Selection{}, fmt.Errorf("%w: current workspace differs from the pre-edit review", ErrSourceChanged)
+		return RecoveryResult{}, fmt.Errorf("%w: current workspace differs from the pre-edit review", ErrSourceChanged)
 	}
 	if err := validator(ctx, sources); err != nil {
-		return Selection{}, err
+		return RecoveryResult{}, err
 	}
 	confirmed, confirmedSources, err := manager.readRecoveryCurrent(ctx, journal)
 	if err != nil {
-		return Selection{}, err
+		return RecoveryResult{}, err
 	}
 	if !sameSourceSets(sources, confirmedSources) {
 		confirmedSources.Close()
-		return Selection{}, fmt.Errorf("%w: active files changed after recovery validation", ErrSourceChanged)
+		return RecoveryResult{}, fmt.Errorf("%w: active files changed after recovery validation", ErrSourceChanged)
 	}
 	confirmedSources.Close()
 	validated = confirmed
 	if err := guard(ctx); err != nil {
-		return Selection{}, err
+		return RecoveryResult{}, err
 	}
 	if resolution == ResolutionFinalizeApplied {
 		freshRecovery, err := manager.InspectRecovery(ctx, lease)
 		if err != nil || freshRecovery.TransactionID != journal.TransactionID || freshRecovery.State != RecoveryApplied {
-			return Selection{}, fmt.Errorf("%w: applied recovery placement changed before finalization", ErrSourceChanged)
+			return RecoveryResult{}, fmt.Errorf("%w: applied recovery placement changed before finalization", ErrSourceChanged)
 		}
 	}
 	freshJournal, err := manager.journal.Load(ctx)
 	if err != nil || freshJournal.TransactionID != journal.TransactionID {
-		return Selection{}, fmt.Errorf("%w: recovery journal changed before finalization", ErrSourceChanged)
+		return RecoveryResult{}, fmt.Errorf("%w: recovery journal changed before finalization", ErrSourceChanged)
 	}
 	guardedSelection, guardedSources, err := manager.readRecoveryCurrent(ctx, journal)
 	if err != nil {
-		return Selection{}, err
+		return RecoveryResult{}, err
 	}
 	if !sameSourceSets(sources, guardedSources) {
 		guardedSources.Close()
-		return Selection{}, fmt.Errorf("%w: active files changed during recovery authorization", ErrSourceChanged)
+		return RecoveryResult{}, fmt.Errorf("%w: active files changed during recovery authorization", ErrSourceChanged)
 	}
 	guardedSources.Close()
 	validated = guardedSelection
 	if resolution == ResolutionFinalizeApplied && !samePreEditRecoveryBoundary(prior.Review, guardedSelection.Review, journal) {
-		return Selection{}, fmt.Errorf("%w: pre-edit workspace boundary changed during recovery authorization", ErrSourceChanged)
+		return RecoveryResult{}, fmt.Errorf("%w: pre-edit workspace boundary changed during recovery authorization", ErrSourceChanged)
 	}
 	if err := manager.removeRecoveryStages(ctx, journal, true); err != nil {
-		return Selection{}, fmt.Errorf("%w: %w", ErrRecoveryRequired, err)
+		return RecoveryResult{}, fmt.Errorf("%w: %w", ErrRecoveryRequired, err)
 	}
 	finalSelection, finalSources, err := manager.readRecoveryCurrent(ctx, journal)
 	if err != nil {
-		return Selection{}, err
+		return RecoveryResult{}, err
 	}
 	if !sameSourceSets(sources, finalSources) {
 		finalSources.Close()
-		return Selection{}, fmt.Errorf("%w: active files changed during recovery cleanup", ErrSourceChanged)
+		return RecoveryResult{}, fmt.Errorf("%w: active files changed during recovery cleanup", ErrSourceChanged)
 	}
 	finalSources.Close()
 	validated = finalSelection
 	if resolution == ResolutionFinalizeApplied && !samePreEditRecoveryBoundary(prior.Review, finalSelection.Review, journal) {
-		return Selection{}, fmt.Errorf("%w: pre-edit workspace boundary changed during recovery cleanup", ErrSourceChanged)
+		return RecoveryResult{}, fmt.Errorf("%w: pre-edit workspace boundary changed during recovery cleanup", ErrSourceChanged)
 	}
 	if err := manager.selections.FinalizeEdit(ctx, validated, journal.TransactionID); err != nil {
-		return Selection{}, fmt.Errorf("%w: finalize recovered workspace", ErrRecoveryRequired)
+		return RecoveryResult{}, fmt.Errorf("%w: finalize recovered workspace", ErrRecoveryRequired)
 	}
-	return validated, nil
+	return RecoveryResult{Selection: validated, SelectionPresent: true}, nil
+}
+
+func (manager *TransactionManager) discardBootstrapRecovery(
+	ctx context.Context,
+	lease *Lease,
+	journal Journal,
+	guard CommitGuard,
+) (RecoveryResult, error) {
+	if _, err := manager.selections.Load(ctx); err == nil {
+		return RecoveryResult{}, fmt.Errorf("%w: a workspace was selected during bootstrap recovery", ErrSourceChanged)
+	} else if !errors.Is(err, ErrNoSelection) {
+		return RecoveryResult{}, err
+	}
+	if err := guard(ctx); err != nil {
+		return RecoveryResult{}, err
+	}
+	fresh, err := manager.InspectRecovery(ctx, lease)
+	if err != nil || fresh.TransactionID != journal.TransactionID || !fresh.Bootstrap || fresh.State != RecoveryUnapplied {
+		return RecoveryResult{}, fmt.Errorf("%w: bootstrap recovery placement changed before discard", ErrSourceChanged)
+	}
+	if err := manager.removeRecoveryStages(ctx, journal, false); err != nil {
+		return RecoveryResult{}, fmt.Errorf("%w: %w", ErrRecoveryRequired, err)
+	}
+	fresh, err = manager.InspectRecovery(ctx, lease)
+	if err != nil || fresh.TransactionID != journal.TransactionID || fresh.State != RecoveryUnapplied {
+		return RecoveryResult{}, fmt.Errorf("%w: bootstrap recovery placement changed during discard", ErrSourceChanged)
+	}
+	if _, err := manager.selections.Load(ctx); err == nil {
+		return RecoveryResult{}, fmt.Errorf("%w: a workspace was selected during bootstrap recovery", ErrSourceChanged)
+	} else if !errors.Is(err, ErrNoSelection) {
+		return RecoveryResult{}, err
+	}
+	if err := manager.journal.Clear(ctx, journal.TransactionID); err != nil {
+		return RecoveryResult{}, fmt.Errorf("%w: clear discarded bootstrap", ErrRecoveryRequired)
+	}
+	return RecoveryResult{}, nil
 }
 
 // samePreEditRecoveryBoundary lets FinalizeApplied accept only the exact
@@ -312,13 +357,30 @@ func sameRecoveryPathUnlessTargeted(prior, current PathEvidence, targets map[str
 }
 
 func (manager *TransactionManager) readRecoveryCurrent(ctx context.Context, journal Journal) (Selection, *SourceSet, error) {
-	prior, err := manager.selections.Load(ctx)
-	if err != nil {
-		return Selection{}, nil, err
+	if journal.Bootstrap {
+		if _, err := manager.selections.Load(ctx); err == nil {
+			return Selection{}, nil, fmt.Errorf("%w: a workspace was selected during bootstrap recovery", ErrSourceChanged)
+		} else if !errors.Is(err, ErrNoSelection) {
+			return Selection{}, nil, err
+		}
 	}
 	request := Request{WorkingDirectory: journal.WorkingDirectory}
-	if prior.Review.ConfigurationSource == ConfigurationExplicit {
+	source := journal.ConfigurationSource
+	if source == "" {
+		prior, err := manager.selections.Load(ctx)
+		if err != nil {
+			return Selection{}, nil, err
+		}
+		source = prior.Review.ConfigurationSource
+	}
+	if source == ConfigurationExplicit {
 		request.ConfigurationPath = journal.ConfigurationPath
+	} else if journal.Bootstrap && source == ConfigurationConventionalYML {
+		if _, _, err := manager.auditMissingTarget(
+			ctx, filepath.Join(journal.WorkingDirectory, ".lego.yaml"), RoleConfiguration, "",
+		); err != nil {
+			return Selection{}, nil, fmt.Errorf("%w: conventional configuration precedence changed", ErrRecoveryRequired)
+		}
 	}
 	review, err := manager.inspector.Inspect(ctx, request)
 	if err != nil || !review.Adoptable || review.Configuration.Path != journal.ConfigurationPath {

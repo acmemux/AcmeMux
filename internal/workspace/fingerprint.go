@@ -20,6 +20,38 @@ func legacyReviewFingerprintV1(review Review) string {
 	return reviewFingerprint(review, "acmemux-workspace-review-v1", writePathFingerprintV1)
 }
 
+// BootstrapFingerprint binds every no-follow creation observation without
+// exposing native content. The configuration service keys and shortens this
+// digest before it crosses the HTTP boundary.
+func BootstrapFingerprint(audit BootstrapAudit) string {
+	digest := sha256.New()
+	writeFingerprintValue(digest, "acmemux-workspace-bootstrap-v1")
+	writeFingerprintValue(digest, string(audit.ConfigurationSource))
+	writePathFingerprint(digest, audit.WorkingDirectory)
+	writeCandidatePathFingerprint(digest, audit.Configuration)
+	writeCandidatePathFingerprint(digest, audit.AlternateConfiguration)
+	writePathFingerprint(digest, audit.ConfigurationParent)
+	writePathFingerprint(digest, audit.Storage)
+	writeFingerprintValue(digest, strconv.Itoa(len(audit.Dotenv)))
+	for _, path := range audit.Dotenv {
+		writeCandidatePathFingerprint(digest, path)
+	}
+	writeFingerprintValue(digest, strconv.Itoa(len(audit.Webroots)))
+	for _, path := range audit.Webroots {
+		writePathFingerprint(digest, path)
+	}
+	return hex.EncodeToString(digest.Sum(nil))
+}
+
+func writeCandidatePathFingerprint(digest fingerprintWriter, path CandidatePath) {
+	writeFingerprintValue(digest, string(path.Role))
+	writeFingerprintValue(digest, path.Reference)
+	writeFingerprintValue(digest, path.Path)
+	writeFingerprintValue(digest, strconv.FormatBool(path.Exists))
+	writeFingerprintValue(digest, strconv.FormatBool(path.WillCreate))
+	writePathFingerprint(digest, path.Evidence)
+}
+
 func reviewFingerprint(review Review, domain string, writePath func(fingerprintWriter, PathEvidence)) string {
 	digest := sha256.New()
 	writeFingerprintValue(digest, domain)

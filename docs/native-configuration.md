@@ -5,20 +5,19 @@ files as authoritative. It does not keep a second desired-state document in
 SQLite and does not provide a raw YAML editor, arbitrary environment-variable
 editor, or generic command interface.
 
-The configuration screen currently exposes inspection, support state, source
-paths, and interrupted-edit recovery. The production `native-base-v1`
-integration manifest manages one field:
+The production `native-ca-certificate-http-v1` integration manifest projects
+the curated storage, account, accepted CA, certificate, renewal, and HTTP-01
+fields documented in `ca-certificate-http.md`. It can create a first native
+configuration or edit an adopted compatible one. The browser still receives
+only logical field identifiers, bounded typed values, and server-derived
+entity bindings; it never receives a native selector or a generic YAML edit
+surface.
 
-| Logical field       | Native location     | Contract                                                                              |
-| ------------------- | ------------------- | ------------------------------------------------------------------------------------- |
-| `workspace.storage` | root YAML `storage` | Non-empty string, at most 4095 bytes; removing it restores upstream's `.lego` default |
-
-Account, CA, challenge, certificate, provider, hook, log, PFX, and credential
-fields are not editable choices in this base manifest. Later integration
-manifests add reviewed typed forms and exact dotenv keys without widening this
-generic boundary. The authenticated same-origin preview and save service is
-already present for those curated forms; no feature-specific raw API is a
-substitute for them.
+The integration is intentionally narrower than the upstream schema. DNS
+providers, arbitrary servers, other CA endpoints, TLS-ALPN, HTTP memcached or
+S3, hooks, CSR, PFX, output controls, and unknown fields remain preserved but
+unsupported. Later integration manifests extend this same reviewed boundary;
+no feature-specific raw API substitutes for a curated manifest.
 
 ## Projection and preservation
 
@@ -38,13 +37,20 @@ comments, export syntax, line endings, and unsupported keys remain unchanged.
 
 The configuration state has these meanings:
 
+- `creation_required`: no workspace is selected and the server has reviewed a
+  safe working directory plus an absent conventional or explicit
+  configuration target. The typed creation form can prepare the first native
+  file.
 - `ready`: the exact runtime schema, source-backed semantic checks, curated
   manifest, and referenced managed credential files all pass.
 - `unsupported`: recognized native content is preserved but falls outside the
   current manifest. Supported fields can remain reviewable, but managed
   `lego` execution is blocked.
-- `invalid`: the document, credential file, schema, semantics, or path cannot
-  be handled safely. Editing is blocked and the active files remain unchanged.
+- `invalid`: the current document does not meet the complete managed contract.
+  Structural, schema, credential-file, or path failures block editing. A
+  schema-valid curated-field constraint can remain editable through the typed
+  form so the administrator can repair it, but execution stays blocked and no
+  candidate can be saved until the resulting document is valid.
 - `recovery_required`: a durable edit journal has not been reconciled. No new
   edit can start.
 
@@ -119,6 +125,30 @@ derived variants; a caller must refuse to persist output when a complete
 filter cannot be built. Redaction is defense in depth and does not replace the
 configuration API's value-free responses and diagnostics.
 
+## First configuration creation
+
+Creation begins from a server-issued `creation_required` snapshot. The request
+names one canonical absolute working directory and either an explicit absent
+configuration path or the conventional `.lego.yml` target. With conventional
+selection, AcmeMux proves that both `.lego.yml` and `.lego.yaml` are absent so
+upstream precedence cannot change underneath the review. The browser repeats
+the opaque base token with logical changes; it cannot select a different
+native target, selector, environment key, or integration manifest.
+
+The resulting configuration must be complete under the curated manifest.
+Storage and every HTTP webroot directory must already exist and pass the
+no-follow ownership, mode, and access policy. A referenced dotenv file may be
+created only when the manifest owns its exact keys and its parent and absent
+target pass the same audit. AcmeMux does not create or repair directories as a
+side effect of configuration creation.
+
+Preview is non-writing. Save reconstructs the exact candidate, rechecks the
+review token and missing targets, immediately reauthorizes the administrator,
+creates the durable journal, and activates restrictive same-directory files
+with `RENAME_NOREPLACE`. An existing target is never overwritten. Fresh
+inspection must prove the active bytes and the complete working, storage,
+webroot, and source boundary before the first workspace selection is stored.
+
 ## Journaled per-file replacement
 
 Preview, save, recovery, runtime and workspace adoption, inventory, and later
@@ -162,8 +192,10 @@ workspace backups appropriate to their filesystem.
 ## Interrupted edit recovery
 
 At restart or the next configuration read, AcmeMux classifies every journaled
-target from current parent, target, staged-file, and inode metadata. It never
-replays a candidate and never assumes that a multi-file edit was atomic.
+target from current parent, target, staged-file, and inode metadata. Recovery
+evidence identifies whether the interrupted operation was a creation or an
+edit. It never replays a candidate and never assumes that a multi-file edit was
+atomic.
 
 | Recovery state | Safe action                                                                                                                                                                                                                     |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -180,6 +212,14 @@ validation, rechecks all evidence around administrator reauthorization,
 removes only recognized residual staging entries, refreshes workspace review,
 and clears the journal. Invalid, unsafe, changing, or unrecognized files leave
 recovery blocked.
+
+An interrupted creation has no previously adopted workspace against which an
+ordinary applied placement can be finalized. A wholly unapplied creation can
+be discarded back to `creation_required`. Any applied, partial, or ambiguous
+creation requires explicit `adopt_current`, which performs the complete fresh
+runtime, native-content, and filesystem review before creating the first
+selection. The recovery screen labels that distinction and never implies that
+inode placement alone proves the originally reviewed creation boundary.
 
 Treat an interrupted `.acmemux-edit-*` file as confidential native material.
 Do not use a broad wildcard deletion and do not promote a staging file into an

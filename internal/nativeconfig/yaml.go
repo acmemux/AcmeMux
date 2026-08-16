@@ -214,11 +214,15 @@ func setNodeAtPath(document *yaml.Node, path []string, value *yaml.Node, forceRe
 	return nil, true, nil
 }
 
-func removeNodeAtPath(document *yaml.Node, path []string) (before *yaml.Node, changed bool, err error) {
+func removeNodeAtPath(document *yaml.Node, path []string, preserveDepth int) (before *yaml.Node, changed bool, err error) {
 	if len(path) == 0 || document == nil || len(document.Content) != 1 {
 		return nil, false, &Error{Code: ErrorInvalidChange, Detail: "field selector is invalid"}
 	}
+	if preserveDepth < 0 || preserveDepth > len(path)-1 {
+		return nil, false, &Error{Code: ErrorInvalidChange, Detail: "field selector boundary is invalid"}
+	}
 	current := document.Content[0]
+	parents := []*yaml.Node{current}
 	for _, key := range path[:len(path)-1] {
 		next, _, found := mappingValue(current, key)
 		if !found {
@@ -228,6 +232,7 @@ func removeNodeAtPath(document *yaml.Node, path []string) (before *yaml.Node, ch
 			return nil, false, &Error{Code: ErrorInvalidChange, Detail: "field parent is not a mapping"}
 		}
 		current = next
+		parents = append(parents, current)
 	}
 	_, keyIndex, found := mappingValue(current, path[len(path)-1])
 	if !found {
@@ -235,6 +240,18 @@ func removeNodeAtPath(document *yaml.Node, path []string) (before *yaml.Node, ch
 	}
 	before = cloneNode(current.Content[keyIndex+1])
 	current.Content = slices.Delete(current.Content, keyIndex, keyIndex+2)
+	for depth := len(path) - 1; depth > preserveDepth; depth-- {
+		child := parents[depth]
+		if child.Kind != yaml.MappingNode || len(child.Content) != 0 {
+			break
+		}
+		parent := parents[depth-1]
+		_, parentKeyIndex, present := mappingValue(parent, path[depth-1])
+		if !present {
+			break
+		}
+		parent.Content = slices.Delete(parent.Content, parentKeyIndex, parentKeyIndex+2)
+	}
 	return before, true, nil
 }
 
