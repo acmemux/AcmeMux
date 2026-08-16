@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ConfigurationRequestError,
+  type ConfigurationChange,
   type ConfigurationClient,
   type ConfigurationDiagnostic,
+  type ConfigurationPreview,
   type ConfigurationSnapshot,
   type ProjectedField,
   type RecoveryResolution,
@@ -12,17 +14,30 @@ import { useAuthenticatedSession } from "../auth/AuthBoundary";
 import { ActionButton } from "../components/ActionButton";
 import { FeedbackPanel } from "../components/FeedbackPanel";
 import { StatusBadge, type StatusTone } from "../components/StatusBadge";
+import {
+  NativeConfigurationEditor,
+  type ConfigurationCreationLocation,
+  type PreparedConfiguration,
+} from "./NativeConfigurationEditor";
 
 type ConfigurationPhase = "loading" | "idle";
+type ConfigurationMutationPhase = "idle" | "previewing" | "saving";
 
 export type ConfigurationController = {
   error: string | null;
+  mutationError: string | null;
+  mutationPhase: ConfigurationMutationPhase;
   phase: ConfigurationPhase;
   recoveryEvidenceStale: boolean;
   recoveryOutcomeUnknown: boolean;
   requestRevision: number;
   snapshot: ConfigurationSnapshot | null;
   refresh(): Promise<void>;
+  previewChanges(
+    changes: ConfigurationChange[],
+    location?: ConfigurationCreationLocation,
+  ): Promise<ConfigurationPreview | null>;
+  savePrepared(prepared: PreparedConfiguration): Promise<boolean>;
   resolveRecovery(resolution: RecoveryResolution): Promise<void>;
 };
 
@@ -55,6 +70,26 @@ function recoveryOutcomeMessage(evidenceReloaded: boolean): string {
   return "The recovery request outcome is unknown. Native files or recovery state may have changed. The recovery evidence below predates that request and is read-only until you check configuration again.";
 }
 
+function mutationMessage(
+  error: unknown,
+  save: boolean,
+  evidenceReloaded = false,
+): string {
+  if (
+    error instanceof ConfigurationRequestError &&
+    error.code === "configuration_changed"
+  ) {
+    return "Native workspace evidence changed after review. No reviewed replacement was applied; load current evidence and prepare a new review.";
+  }
+  if (!save) {
+    return safeRequestMessage(error);
+  }
+  if (evidenceReloaded) {
+    return "The save response could not confirm its outcome. Current native evidence was reloaded; inspect it before preparing another change.";
+  }
+  return "The save outcome is unknown. Native files may have changed. Check configuration before preparing another change.";
+}
+
 export function useConfigurationController(
   client: ConfigurationClient,
   activationKey: string | null,
@@ -64,6 +99,9 @@ export function useConfigurationController(
   const [snapshot, setSnapshot] = useState<ConfigurationSnapshot | null>(null);
   const [phase, setPhase] = useState<ConfigurationPhase>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [mutationPhase, setMutationPhase] =
+    useState<ConfigurationMutationPhase>("idle");
   const [loadedActivationKey, setLoadedActivationKey] = useState<string | null>(
     null,
   );
@@ -159,6 +197,9 @@ export function useConfigurationController(
         const next = await client.resolveRecovery(
           snapshot.source.baseRevisionToken,
           resolution,
+          snapshot.recovery.operation,
+          snapshot.source.configurationPath,
+          snapshot.source.runtimeManifestId,
         );
         if (requestVersion.current === version) {
           setSnapshot(next);
@@ -209,6 +250,164 @@ export function useConfigurationController(
     ],
   );
 
+  const previewChanges = useCallback(
+    async (
+      changes: ConfigurationChange[],
+      location?: ConfigurationCreationLocation,
+    ): Promise<ConfigurationPreview | null> => {
+      if (
+        activationKey === null ||
+        !interactionsEnabled ||
+        refreshActive.current ||
+        snapshot === null
+      ) {
+        return null;
+      }
+      const creation = snapshot.state === "creation_required";
+      if (
+        (creation && location === undefined) ||
+        (!creation &&
+          (snapshot.state === "recovery_required" ||
+            !snapshot.capabilities.editing))
+      ) {
+        return null;
+      }
+      refreshActive.current = true;
+      const version = requestVersion.current;
+      setMutationPhase("previewing");
+      setMutationError(null);
+      try {
+        const result = creation
+          ? await client.previewCreation(
+              snapshot.source.baseRevisionToken,
+              location!.workingDirectory,
+              location!.configurationPath,
+              changes,
+            )
+          : await client.previewChanges(
+              snapshot.source.baseRevisionToken,
+              changes,
+            );
+        return requestVersion.current === version ? result : null;
+      } catch (requestError) {
+        if (
+          requestVersion.current === version &&
+          !handleProtectedError(requestError)
+        ) {
+          setMutationError(mutationMessage(requestError, false));
+        }
+        return null;
+      } finally {
+        refreshActive.current = false;
+        if (requestVersion.current === version) {
+          setMutationPhase("idle");
+        }
+      }
+    },
+    [
+      activationKey,
+      client,
+      handleProtectedError,
+      interactionsEnabled,
+      snapshot,
+    ],
+  );
+
+  const savePrepared = useCallback(
+    async (prepared: PreparedConfiguration): Promise<boolean> => {
+      if (
+        activationKey === null ||
+        !interactionsEnabled ||
+        refreshActive.current ||
+        snapshot === null ||
+        prepared.preview.state !== "review_required"
+      ) {
+        return false;
+      }
+      const creation = snapshot.state === "creation_required";
+      if (
+        (creation && prepared.location === undefined) ||
+        prepared.preview.baseRevisionToken !==
+          snapshot.source.baseRevisionToken ||
+        (!creation &&
+          (snapshot.state === "recovery_required" ||
+            !snapshot.capabilities.editing))
+      ) {
+        return false;
+      }
+      refreshActive.current = true;
+      const version = requestVersion.current;
+      setMutationPhase("saving");
+      setMutationError(null);
+      try {
+        const next = creation
+          ? await client.createConfiguration(
+              prepared.location!.workingDirectory,
+              prepared.location!.configurationPath,
+              prepared.preview.baseRevisionToken,
+              snapshot.source.runtimeManifestId,
+              prepared.changes,
+              prepared.preview.reviewedPreviewToken,
+            )
+          : await client.saveChanges(
+              snapshot.source.baseRevisionToken,
+              snapshot.source.configurationPath,
+              snapshot.source.runtimeManifestId,
+              prepared.changes,
+              prepared.preview.reviewedPreviewToken,
+            );
+        if (requestVersion.current !== version) return false;
+        setSnapshot(next);
+        setRecoveryEvidenceStale(false);
+        setRecoveryOutcomeUnknown(false);
+        setRequestRevision((current) => current + 1);
+        return true;
+      } catch (requestError) {
+        if (
+          requestVersion.current !== version ||
+          handleProtectedError(requestError)
+        ) {
+          return false;
+        }
+        if (
+          requestError instanceof ConfigurationRequestError &&
+          requestError.code === "configuration_changed"
+        ) {
+          setMutationError(mutationMessage(requestError, true));
+          return false;
+        }
+        try {
+          const current = await client.getConfiguration();
+          if (requestVersion.current === version) {
+            setSnapshot(current);
+            setRequestRevision((revision) => revision + 1);
+            setMutationError(mutationMessage(requestError, true, true));
+          }
+        } catch (reloadError) {
+          if (
+            requestVersion.current === version &&
+            !handleProtectedError(reloadError)
+          ) {
+            setMutationError(mutationMessage(requestError, true));
+          }
+        }
+        return false;
+      } finally {
+        refreshActive.current = false;
+        if (requestVersion.current === version) {
+          setMutationPhase("idle");
+        }
+      }
+    },
+    [
+      activationKey,
+      client,
+      handleProtectedError,
+      interactionsEnabled,
+      snapshot,
+    ],
+  );
+
   useEffect(() => {
     if (activationKey === null) {
       requestVersion.current += 1;
@@ -220,6 +419,7 @@ export function useConfigurationController(
         const next = await client.getConfiguration();
         if (requestVersion.current === version) {
           setSnapshot(next);
+          setMutationError(null);
           setRecoveryEvidenceStale(false);
           setRecoveryOutcomeUnknown(false);
           setRequestRevision(version);
@@ -251,10 +451,14 @@ export function useConfigurationController(
     activationKey !== null && loadedActivationKey === activationKey;
   return {
     error: active ? error : null,
+    mutationError: active ? mutationError : null,
+    mutationPhase: active ? mutationPhase : "idle",
     phase: activationKey === null ? "idle" : active ? phase : "loading",
     recoveryEvidenceStale: active && recoveryEvidenceStale,
     recoveryOutcomeUnknown: active && recoveryOutcomeUnknown,
     refresh,
+    previewChanges,
+    savePrepared,
     resolveRecovery,
     requestRevision,
     snapshot: active && phase !== "loading" ? snapshot : null,
@@ -377,8 +581,9 @@ function RecoveryView({
       </h3>
       <p>
         Journal phase: <code>{snapshot.recovery.phase}</code>. Durable state:{" "}
-        <code>{snapshot.recovery.state}</code>. AcmeMux will not replay or roll
-        back an ambiguous native change automatically.
+        <code>{snapshot.recovery.state}</code>. Interrupted operation:{" "}
+        <code>{snapshot.recovery.operation}</code>. AcmeMux will not replay or
+        roll back an ambiguous native change automatically.
       </p>
       <ul>
         {snapshot.recovery.targets.map((target) => (
@@ -408,7 +613,8 @@ function RecoveryView({
           </ActionButton>
         </div>
       ) : null}
-      {snapshot.recovery.state === "applied" ? (
+      {snapshot.recovery.state === "applied" &&
+      snapshot.recovery.operation === "edit" ? (
         <div className="am-configuration-recovery__actions">
           <p>
             Every reviewed candidate is active. Finalizing revalidates the
@@ -428,9 +634,11 @@ function RecoveryView({
       snapshot.recovery.state === "ambiguous" ? (
         <div className="am-configuration-recovery__actions">
           <p>
-            {snapshot.recovery.state === "applied"
-              ? "If the reviewed edit intentionally changed native path references, explicitly accept the freshly validated active files instead of using the pre-edit finalization boundary."
-              : "Repair the active native files outside AcmeMux and remove every recognized .acmemux-edit-* staging entry. AcmeMux can then validate and adopt the active files exactly as they are. It never replays a staged candidate."}
+            {snapshot.recovery.operation === "creation"
+              ? "This interrupted creation has no previously adopted workspace to finalize. Review the active native files, then explicitly accept the current workspace without replaying staged content."
+              : snapshot.recovery.state === "applied"
+                ? "If the reviewed edit intentionally changed native path references, explicitly accept the freshly validated active files instead of using the pre-edit finalization boundary."
+                : "Repair the active native files outside AcmeMux and remove every recognized .acmemux-edit-* staging entry. AcmeMux can then validate and adopt the active files exactly as they are. It never replays a staged candidate."}
           </p>
           <label>
             <input
@@ -439,9 +647,11 @@ function RecoveryView({
               onChange={(event) => setAdoptConfirmed(event.target.checked)}
               type="checkbox"
             />
-            {snapshot.recovery.state === "applied"
-              ? "I reviewed the active native files and accept their current path references without replaying staged content."
-              : "I repaired the active files and removed the interrupted staging entries. Accept the current native files without replaying them."}
+            {snapshot.recovery.operation === "creation"
+              ? "I reviewed the active native files and explicitly accept this workspace without replaying staged content."
+              : snapshot.recovery.state === "applied"
+                ? "I reviewed the active native files and accept their current path references without replaying staged content."
+                : "I repaired the active files and removed the interrupted staging entries. Accept the current native files without replaying them."}
           </label>
           <ActionButton
             isDisabled={!interactionsEnabled || !adoptConfirmed}
@@ -462,9 +672,15 @@ function presentation(snapshot: ConfigurationSnapshot): {
   tone: StatusTone;
 } {
   switch (snapshot.state) {
+    case "creation_required":
+      return {
+        copy: "No native configuration is adopted. Prepare a supported CA, HTTP-01 challenge, and certificate definition, then review the exact native intent before AcmeMux creates a restrictive .lego.yml file.",
+        label: "Native configuration required",
+        tone: "warning",
+      };
     case "ready":
       return {
-        copy: "The current native files were projected without unsupported or invalid content. Later typed forms can prepare reviewed changes through this boundary.",
+        copy: "The current native files were projected without unsupported or invalid content. Typed forms can prepare reviewed changes through this boundary.",
         label: "Configuration engine ready",
         tone: "success",
       };
@@ -476,8 +692,12 @@ function presentation(snapshot: ConfigurationSnapshot): {
       };
     case "invalid":
       return {
-        copy: "The current native content cannot be projected or edited safely. Active files were not changed.",
-        label: "Configuration invalid",
+        copy: snapshot.capabilities.editing
+          ? "Curated native values violate a supported constraint. Typed forms remain available to prepare a complete repair; execution stays blocked until the reviewed result is valid."
+          : "The current native content cannot be projected or edited safely. Active files were not changed.",
+        label: snapshot.capabilities.editing
+          ? "Configuration needs repair"
+          : "Configuration invalid",
         tone: "danger",
       };
     case "recovery_required":
@@ -495,6 +715,8 @@ export function configurationSignal(
   if (controller.phase === "loading") return "Checking";
   if (controller.error) return "Unavailable";
   switch (controller.snapshot?.state) {
+    case "creation_required":
+      return "Creation required";
     case "ready":
       return "Ready";
     case "unsupported":
@@ -569,6 +791,25 @@ export function ConfigurationPanel({
         </FeedbackPanel>
       ) : null}
 
+      {controller.mutationError ? (
+        <FeedbackPanel
+          announcement="assertive"
+          tone="interrupted"
+          title="Configuration change needs attention"
+        >
+          <p>{controller.mutationError}</p>
+          <ActionButton
+            isDisabled={
+              !interactionsEnabled || controller.mutationPhase !== "idle"
+            }
+            onPress={() => void controller.refresh()}
+            variant="secondary"
+          >
+            Load current configuration evidence
+          </ActionButton>
+        </FeedbackPanel>
+      ) : null}
+
       {snapshot && statePresentation ? (
         <div className="am-configuration-current">
           <FeedbackPanel
@@ -599,30 +840,65 @@ export function ConfigurationPanel({
               }
               snapshot={snapshot}
             />
+          ) : snapshot.state === "creation_required" ? (
+            <NativeConfigurationEditor
+              interactionsEnabled={interactionsEnabled}
+              key={
+                snapshot.source.runtimeManifestId +
+                ":" +
+                String(controller.requestRevision)
+              }
+              mode="creation"
+              onPreview={controller.previewChanges}
+              onSave={controller.savePrepared}
+              operationPending={controller.mutationPhase !== "idle"}
+              projection={[]}
+              revisionKey={
+                snapshot.source.runtimeManifestId +
+                ":" +
+                String(controller.requestRevision)
+              }
+            />
           ) : (
-            <ProjectionSummary projection={snapshot.projection} />
+            <>
+              <ProjectionSummary projection={snapshot.projection} />
+              {snapshot.capabilities.editing ? (
+                <NativeConfigurationEditor
+                  interactionsEnabled={interactionsEnabled}
+                  key={snapshot.source.baseRevisionToken}
+                  mode="edit"
+                  onPreview={controller.previewChanges}
+                  onSave={controller.savePrepared}
+                  operationPending={controller.mutationPhase !== "idle"}
+                  projection={snapshot.projection}
+                  revisionKey={snapshot.source.baseRevisionToken}
+                />
+              ) : null}
+            </>
           )}
-          <details className="am-disclosure">
-            <summary>Show native configuration source paths</summary>
-            <dl>
-              <div>
-                <dt>Configuration</dt>
-                <dd>{snapshot.source.configurationPath}</dd>
-              </div>
-              <div>
-                <dt>Runtime manifest</dt>
-                <dd>{snapshot.source.runtimeManifestId}</dd>
-              </div>
-              <div>
-                <dt>Referenced dotenv files</dt>
-                <dd>
-                  {snapshot.source.dotenvPaths.length > 0
-                    ? snapshot.source.dotenvPaths.join(", ")
-                    : "None"}
-                </dd>
-              </div>
-            </dl>
-          </details>
+          {snapshot.state !== "creation_required" ? (
+            <details className="am-disclosure">
+              <summary>Show native configuration source paths</summary>
+              <dl>
+                <div>
+                  <dt>Configuration</dt>
+                  <dd>{snapshot.source.configurationPath}</dd>
+                </div>
+                <div>
+                  <dt>Runtime manifest</dt>
+                  <dd>{snapshot.source.runtimeManifestId}</dd>
+                </div>
+                <div>
+                  <dt>Referenced dotenv files</dt>
+                  <dd>
+                    {snapshot.source.dotenvPaths.length > 0
+                      ? snapshot.source.dotenvPaths.join(", ")
+                      : "None"}
+                  </dd>
+                </div>
+              </dl>
+            </details>
+          ) : null}
         </div>
       ) : null}
 

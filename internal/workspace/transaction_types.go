@@ -41,6 +41,7 @@ const (
 	PurposeManualRun Purpose = "manual_run"
 	PurposeScheduled Purpose = "scheduled_run"
 	PurposeRecovery  Purpose = "recovery"
+	PurposeBootstrap Purpose = "configuration_bootstrap"
 )
 
 // FileIdentity is secret-free Linux inode and metadata evidence. It is safe
@@ -149,6 +150,36 @@ type CandidateAudit struct {
 	Webroots []PathEvidence
 }
 
+// BootstrapRequest selects a missing native configuration target. An empty
+// ConfigurationPath uses the conventional .lego.yml target after proving
+// that neither conventional filename exists.
+type BootstrapRequest struct {
+	WorkingDirectory  string
+	ConfigurationPath string
+}
+
+// BootstrapAudit is the complete secret-free evidence bound into a creation
+// preview. Configuration and any replacement dotenv targets are missing;
+// storage and webroots already exist and pass the ordinary workspace policy.
+type BootstrapAudit struct {
+	ConfigurationSource    ConfigurationSource
+	WorkingDirectory       PathEvidence
+	Configuration          CandidatePath
+	AlternateConfiguration CandidatePath
+	ConfigurationParent    PathEvidence
+	Storage                PathEvidence
+	Dotenv                 []CandidatePath
+	Webroots               []PathEvidence
+}
+
+// BootstrapPlan creates and adopts one missing native configuration through
+// the same durable journal used for normal edits.
+type BootstrapPlan struct {
+	Request                BootstrapRequest
+	CandidateConfiguration []byte
+	Replacements           []Replacement
+}
+
 // CommitGuard revalidates the administrator session immediately before the
 // first active rename. It must not mutate native files.
 type CommitGuard func(context.Context) error
@@ -238,12 +269,21 @@ const (
 // Journal contains only recovery metadata. It never contains native bytes,
 // content digests, field identifiers, summaries, or secret values.
 type Journal struct {
-	TransactionID     string
-	Phase             JournalPhase
-	WorkingDirectory  string
-	ConfigurationPath string
-	CreatedAt         time.Time
-	Files             []JournalFile
+	TransactionID       string
+	Phase               JournalPhase
+	WorkingDirectory    string
+	ConfigurationPath   string
+	Bootstrap           bool
+	ConfigurationSource ConfigurationSource
+	CreatedAt           time.Time
+	Files               []JournalFile
+}
+
+// RecoveryResult distinguishes a normal edit recovery from a successful
+// bootstrap discard, after which no workspace selection exists.
+type RecoveryResult struct {
+	Selection        Selection
+	SelectionPresent bool
 }
 
 // JournalFile is one target's persisted replacement identity.
@@ -285,6 +325,7 @@ type Recovery struct {
 	TransactionID     string
 	WorkingDirectory  string
 	ConfigurationPath string
+	Bootstrap         bool
 	Phase             JournalPhase
 	State             RecoveryState
 	Files             []RecoveryFile

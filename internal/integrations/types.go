@@ -57,6 +57,7 @@ const (
 var (
 	fieldIDWithUnderscore = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
 	bindingIDPattern      = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	bindingValuePattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]*$`)
 	environmentKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 )
 
@@ -260,6 +261,10 @@ func validFieldID(value FieldID) bool {
 
 func validBindingID(value BindingID) bool {
 	return len(value) <= 64 && bindingIDPattern.MatchString(string(value))
+}
+
+func validBindingValue(value string) bool {
+	return len(value) <= 64 && bindingValuePattern.MatchString(value)
 }
 
 func validYAMLKey(value string) bool {

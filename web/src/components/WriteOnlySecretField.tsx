@@ -8,17 +8,21 @@ export type SecretDraft =
 export function WriteOnlySecretField({
   description,
   draft,
+  error,
   id,
   isDisabled = false,
   label,
+  maxLength,
   onChange,
   presence,
 }: {
   description: string;
   draft: SecretDraft;
+  error?: string;
   id: string;
   isDisabled?: boolean;
   label: string;
+  maxLength?: number;
   onChange(draft: SecretDraft): void;
   presence: "present" | "absent";
 }) {
@@ -36,7 +40,7 @@ export function WriteOnlySecretField({
   }
 
   return (
-    <fieldset className="am-secret-field" disabled={isDisabled}>
+    <fieldset className="am-secret-field" disabled={isDisabled} id={id}>
       <legend>{label}</legend>
       <p id={`${id}-description`}>{description}</p>
       <p className="am-secret-field__presence">
@@ -80,10 +84,12 @@ export function WriteOnlySecretField({
         <div className="am-field am-secret-field__replacement">
           <label htmlFor={`${id}-replacement`}>New secret value</label>
           <input
-            aria-describedby={`${id}-description ${id}-replacement-description`}
+            aria-describedby={`${id}-description ${id}-replacement-description${error ? ` ${id}-replacement-error` : ""}`}
+            aria-invalid={Boolean(error)}
             autoCapitalize="none"
             autoComplete="off"
             id={`${id}-replacement`}
+            maxLength={maxLength}
             onChange={(event) =>
               onChange({ action: "replace", secret: event.currentTarget.value })
             }
@@ -96,6 +102,11 @@ export function WriteOnlySecretField({
             The new value remains write-only and will be omitted from every
             preview and diagnostic.
           </span>
+          {error ? (
+            <span id={`${id}-replacement-error`} role="alert">
+              {error}
+            </span>
+          ) : null}
         </div>
       ) : null}
     </fieldset>

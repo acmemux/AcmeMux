@@ -101,12 +101,12 @@ credential value.
 Native configuration mediation is another layer on the same runtime and
 workspace trust boundaries. One exact-runtime integration manifest projects
 only stable logical fields from the authoritative YAML node tree. The current
-base manifest manages only root `storage`; later CA, challenge, certificate,
-and provider tasks extend the manifest deliberately. Recognized but unmanaged
-native content remains in the tree and blocks execution. Unknown fields or
-YAML structures whose meaning cannot be preserved safely block replacement as
-well. Dotenv values are projected only as presence and validity, and only
-manifest-owned secret keys can be changed.
+production manifest manages storage, the accepted CA account choices,
+certificates, renewal behavior, and HTTP-01 listener or webroot challenges.
+Recognized but unmanaged native content remains in the tree and blocks
+execution. Unknown fields or YAML structures whose meaning cannot be preserved
+safely block replacement as well. Secret values are projected only as presence
+and validity, and only manifest-owned secret fields can be changed.
 
 Preview is non-writing. Memory-only HMAC tokens bind the reviewed runtime,
 workspace, source files, logical changes, and exact candidate replacements.
@@ -118,6 +118,15 @@ is not. A durable secret-free journal classifies interruption without replaying
 candidate content. Wholly unapplied or wholly applied outcomes have bounded
 resolution paths; partial or ambiguous results require explicit host repair
 and validated adoption of the current files. See `native-configuration.md`.
+
+When no workspace has been selected, the same service can create one complete
+curated configuration at a reviewed absent target. It binds the safe working
+directory, target precedence, pre-existing storage and webroots, and exact
+candidate sources before using the same secret-free journal and
+same-directory no-replace activation. No workspace selection is stored until
+a fresh inspection proves the active native files and full path boundary.
+Interrupted creation is identified separately in recovery; applied creation
+requires explicit validated adoption because no pre-edit selection exists.
 
 The browser shell is composed from authored tokens and semantic components.
 React Aria supplies headless interaction behavior, while the application owns

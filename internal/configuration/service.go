@@ -31,6 +31,7 @@ const (
 	StateUnsupported      State = "unsupported"
 	StateInvalid          State = "invalid"
 	StateRecoveryRequired State = "recovery_required"
+	StateCreationRequired State = "creation_required"
 )
 
 type PreviewState string
@@ -135,6 +136,15 @@ type Preview struct {
 	Execution            bool
 }
 
+// CreationRequest describes a missing native configuration target and the
+// complete logical field changes used to synthesize it. An empty
+// ConfigurationPath selects conventional .lego.yml creation.
+type CreationRequest struct {
+	WorkingDirectory  string
+	ConfigurationPath string
+	Changes           []nativeconfig.Change
+}
+
 type RuntimeSelections interface {
 	Load(context.Context) (acmeruntime.Selection, error)
 }
@@ -153,8 +163,10 @@ type Transactions interface {
 	Snapshot(context.Context, *workspace.Lease) (*workspace.SourceSet, error)
 	AuditCandidate(context.Context, *workspace.Lease, *workspace.SourceSet, []byte, []workspace.Replacement) (workspace.CandidateAudit, error)
 	Commit(context.Context, *workspace.Lease, workspace.CommitPlan, workspace.CommitGuard) (workspace.Selection, error)
+	AuditBootstrap(context.Context, *workspace.Lease, workspace.BootstrapRequest, []byte, []workspace.Replacement) (workspace.BootstrapAudit, error)
+	Bootstrap(context.Context, *workspace.Lease, workspace.BootstrapPlan, workspace.CommitGuard) (workspace.Selection, error)
 	InspectRecovery(context.Context, *workspace.Lease) (workspace.Recovery, error)
-	ResolveRecovery(context.Context, *workspace.Lease, workspace.RecoveryResolution, workspace.CommitGuard, workspace.RecoveryValidator) (workspace.Selection, error)
+	ResolveRecovery(context.Context, *workspace.Lease, workspace.RecoveryResolution, workspace.CommitGuard, workspace.RecoveryValidator) (workspace.RecoveryResult, error)
 }
 
 type EngineFactory func(compatibility.ManifestID) (*nativeconfig.Engine, integrations.Manifest, error)
@@ -206,7 +218,7 @@ func New(dependencies Dependencies) (*Service, error) {
 }
 
 func productionEngine(runtimeID compatibility.ManifestID) (*nativeconfig.Engine, integrations.Manifest, error) {
-	manifest, ok := integrations.BaseManifest(runtimeID)
+	manifest, ok := integrations.CoreManifest(runtimeID)
 	if !ok {
 		return nil, integrations.Manifest{}, fmt.Errorf("%w: runtime integration manifest", ErrUnavailable)
 	}

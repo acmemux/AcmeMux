@@ -42,8 +42,8 @@ func TestOpenCreatesRestrictiveMigratedState(t *testing.T) {
 	if err := database.connection.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&migrationsApplied); err != nil {
 		t.Fatalf("query migration ledger: %v", err)
 	}
-	if migrationsApplied != 6 {
-		t.Fatalf("migration count = %d, want 6", migrationsApplied)
+	if migrationsApplied != 7 {
+		t.Fatalf("migration count = %d, want 7", migrationsApplied)
 	}
 	for _, prohibited := range []string{"credential", "certificate", "private_key", "native_config", "account_material"} {
 		var count int

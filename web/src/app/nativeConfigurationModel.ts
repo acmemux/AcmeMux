@@ -1,0 +1,1595 @@
+import type {
+  ConfigurationBinding,
+  ConfigurationChange,
+  ConfigurationValue,
+  ProjectedField,
+} from "../api/configuration";
+import type { SecretDraft } from "../components/WriteOnlySecretField";
+
+export const managedFieldIds = {
+  storage: "workspace.storage",
+  accountServer: "account.server",
+  accountEmail: "account.email",
+  accountKeyType: "account.key_type",
+  accountTerms: "account.accepts_terms_of_service",
+  accountEabKid: "account.eab.kid",
+  accountEabHmac: "account.eab.hmac_key",
+  certificateDomains: "certificate.domains",
+  certificateKeyType: "certificate.key_type",
+  certificateAccount: "certificate.account",
+  certificateChallenge: "certificate.challenge",
+  certificateRenewDays: "certificate.renew.days",
+  certificateRenewReuseKey: "certificate.renew.reuse_key",
+  certificateRenewDisableRandomSleep: "certificate.renew.disable_random_sleep",
+  certificateRenewAriDisable: "certificate.renew.ari.disable",
+  certificateRenewAriWait: "certificate.renew.ari.wait_to_renew_duration",
+  challengeAddress: "challenge.http.address",
+  challengeDelay: "challenge.http.delay",
+  challengeProxyHeader: "challenge.http.proxy_header",
+  challengeWebroot: "challenge.http.webroot",
+} as const;
+
+export type CAOption = {
+  value: string;
+  label: string;
+  environment: "production" | "staging";
+  eab: "none" | "optional" | "required";
+  prerequisite: string;
+  aliases: readonly string[];
+};
+
+export const caOptions: readonly CAOption[] = [
+  {
+    value: "letsencrypt",
+    label: "Let's Encrypt production",
+    environment: "production",
+    eab: "none",
+    prerequisite: "Public issuance limits apply.",
+    aliases: ["letsencrypt", "https://acme-v02.api.letsencrypt.org/directory"],
+  },
+  {
+    value: "letsencrypt-staging",
+    label: "Let's Encrypt staging",
+    environment: "staging",
+    eab: "none",
+    prerequisite: "Certificates are not publicly trusted.",
+    aliases: [
+      "letsencrypt-staging",
+      "https://acme-staging-v02.api.letsencrypt.org/directory",
+    ],
+  },
+  {
+    value: "zerossl",
+    label: "ZeroSSL production",
+    environment: "production",
+    eab: "optional",
+    prerequisite: "Use account email assistance or explicit EAB credentials.",
+    aliases: ["zerossl", "https://acme.zerossl.com/v2/DV90"],
+  },
+  {
+    value: "googletrust",
+    label: "Google Trust Services production",
+    environment: "production",
+    eab: "required",
+    prerequisite: "Google Trust Services EAB credentials are required.",
+    aliases: ["googletrust", "https://dv.acme-v02.api.pki.goog/directory"],
+  },
+  {
+    value: "googletrust-staging",
+    label: "Google Trust Services staging",
+    environment: "staging",
+    eab: "required",
+    prerequisite:
+      "Staging EAB credentials are separate from production credentials.",
+    aliases: [
+      "googletrust-staging",
+      "https://dv.acme-v02.test-api.pki.goog/directory",
+    ],
+  },
+  {
+    value: "sslcomrsa",
+    label: "SSL.com RSA production",
+    environment: "production",
+    eab: "required",
+    prerequisite: "SSL.com RSA EAB credentials are required.",
+    aliases: ["sslcomrsa", "https://acme.ssl.com/sslcom-dv-rsa"],
+  },
+  {
+    value: "sslcomecc",
+    label: "SSL.com ECDSA production",
+    environment: "production",
+    eab: "required",
+    prerequisite: "SSL.com ECDSA EAB credentials are required.",
+    aliases: ["sslcomecc", "https://acme.ssl.com/sslcom-dv-ecc"],
+  },
+  {
+    value: "https://acme.godaddy.com/v1/acme/directory",
+    label: "GoDaddy CA production",
+    environment: "production",
+    eab: "required",
+    prerequisite:
+      "An entitled GoDaddy ACME account and account-issued EAB are required.",
+    aliases: ["https://acme.godaddy.com/v1/acme/directory"],
+  },
+] as const;
+
+export const keyTypeOptions = [
+  "EC256",
+  "EC384",
+  "RSA2048",
+  "RSA4096",
+  "RSA8192",
+] as const;
+
+export type SupportedKeyType = (typeof keyTypeOptions)[number];
+
+export type AccountDraft = {
+  name: string;
+  isNew: boolean;
+  originalServer: string | null;
+  originalAcceptsTerms: boolean;
+  server: string;
+  email: string;
+  keyType: SupportedKeyType | "";
+  acceptsTerms: boolean;
+  eabKid: string;
+  eabHmac: SecretDraft;
+  eabPresent: boolean;
+};
+
+export type HTTPChallengeDraft = {
+  name: string;
+  isNew: boolean;
+  predefined: boolean;
+  mode: "listener" | "webroot";
+  address: string;
+  delay: string;
+  proxyHeader: string;
+  webroot: string;
+};
+
+export type CertificateDraft = {
+  name: string;
+  isNew: boolean;
+  domains: string[];
+  account: string;
+  challenge: string;
+  challengeUnsupported: boolean;
+  keyType: SupportedKeyType | "";
+  renewDays: number;
+  reuseKey: boolean;
+  disableRandomSleep: boolean;
+  disableARI: boolean;
+  ariWait: string;
+};
+
+export type NativeConfigurationDraft = {
+  creation: boolean;
+  storage: string;
+  accounts: AccountDraft[];
+  challenges: HTTPChallengeDraft[];
+  certificates: CertificateDraft[];
+  unsupportedFields: UnsupportedDraftField[];
+};
+
+export type UnsupportedDraftField = {
+  fieldId: string;
+  bindings: ConfigurationBinding[];
+  kind: ProjectedField["kind"];
+  label: string;
+};
+
+export type DraftIssue = {
+  fieldId: string;
+  message: string;
+};
+
+export const maximumConfigurationChanges = 128;
+
+export function validateChangeBudget(
+  changes: ConfigurationChange[],
+): DraftIssue[] {
+  if (changes.length <= maximumConfigurationChanges) return [];
+  return [
+    {
+      fieldId: "managed-configuration-heading",
+      message: `This draft prepares ${changes.length.toLocaleString("en-US")} native field changes; one reviewed request can contain at most ${maximumConfigurationChanges.toLocaleString("en-US")}. Reduce this draft before preview.`,
+    },
+  ];
+}
+
+function bindingsFor(
+  kind: "account" | "certificate" | "challenge",
+  name: string,
+) {
+  return [{ id: kind, value: name }];
+}
+
+function fieldIdentity(
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+): string {
+  return JSON.stringify([
+    fieldId,
+    bindings.map(({ id, value }) => [id, value]),
+  ]);
+}
+
+export function acknowledgeUnsupportedField(
+  draft: NativeConfigurationDraft,
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+): NativeConfigurationDraft {
+  const identity = fieldIdentity(fieldId, bindings);
+  return {
+    ...draft,
+    unsupportedFields: draft.unsupportedFields.filter(
+      (field) => fieldIdentity(field.fieldId, field.bindings) !== identity,
+    ),
+  };
+}
+
+export function fieldNeedsExplicitRepair(
+  draft: NativeConfigurationDraft,
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+): boolean {
+  const identity = fieldIdentity(fieldId, bindings);
+  return draft.unsupportedFields.some(
+    (field) => fieldIdentity(field.fieldId, field.bindings) === identity,
+  );
+}
+
+function bindingValue(field: ProjectedField, id: string): string | undefined {
+  return field.bindings.find((binding) => binding.id === id)?.value;
+}
+
+function identityMatches(
+  field: ProjectedField,
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+): boolean {
+  return (
+    field.fieldId === fieldId &&
+    JSON.stringify(field.bindings) === JSON.stringify(bindings)
+  );
+}
+
+function fieldFor(
+  projection: ProjectedField[],
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+): ProjectedField | undefined {
+  return projection.find((field) => identityMatches(field, fieldId, bindings));
+}
+
+function publicValue(
+  projection: ProjectedField[],
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+): ConfigurationValue | undefined {
+  const field = fieldFor(projection, fieldId, bindings);
+  if (!field || !field.configured || field.kind === "secret") return undefined;
+  return field.value;
+}
+
+function stringValue(
+  projection: ProjectedField[],
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+  fallback: string,
+): string {
+  const value = publicValue(projection, fieldId, bindings);
+  return typeof value === "string" ? value : fallback;
+}
+
+function booleanValue(
+  projection: ProjectedField[],
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+  fallback = false,
+): boolean {
+  const value = publicValue(projection, fieldId, bindings);
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function integerValue(
+  projection: ProjectedField[],
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+  fallback = 0,
+): number {
+  const value = publicValue(projection, fieldId, bindings);
+  return typeof value === "number" ? value : fallback;
+}
+
+function listValue(
+  projection: ProjectedField[],
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+): string[] {
+  const value = publicValue(projection, fieldId, bindings);
+  return Array.isArray(value) ? [...value] : [];
+}
+
+export function resolveCA(value: string): CAOption | undefined {
+  return caOptions.find((option) => option.aliases.includes(value));
+}
+
+function uniqueNames(
+  projection: ProjectedField[],
+  binding: "account" | "certificate" | "challenge",
+): string[] {
+  const names = projection
+    .map((field) => bindingValue(field, binding))
+    .filter((value): value is string => value !== undefined);
+  if (binding === "account") {
+    for (const field of projection) {
+      if (field.fieldId !== managedFieldIds.certificateAccount) continue;
+      const value =
+        field.configured && field.kind === "string" ? field.value : undefined;
+      if (value) names.push(value);
+    }
+  }
+  if (binding === "challenge") {
+    for (const field of projection) {
+      if (field.fieldId !== managedFieldIds.certificateChallenge) continue;
+      const value =
+        field.configured && field.kind === "string" ? field.value : undefined;
+      if (value && names.includes(value)) {
+        names.push(value);
+      }
+    }
+  }
+  return [...new Set(names)].sort((left, right) => left.localeCompare(right));
+}
+
+function acceptedKeyType(value: string): SupportedKeyType | "" {
+  return keyTypeOptions.includes(value as SupportedKeyType)
+    ? (value as SupportedKeyType)
+    : "";
+}
+
+export function initialConfigurationDraft(
+  projection: ProjectedField[],
+  creation = false,
+): NativeConfigurationDraft {
+  if (creation) {
+    return {
+      creation: true,
+      storage: ".lego",
+      accounts: [
+        {
+          name: "primary",
+          isNew: true,
+          originalServer: null,
+          originalAcceptsTerms: false,
+          server: "letsencrypt",
+          email: "",
+          keyType: "EC256",
+          acceptsTerms: false,
+          eabKid: "",
+          eabHmac: { action: "keep" },
+          eabPresent: false,
+        },
+      ],
+      challenges: [
+        {
+          name: "http-home",
+          isNew: true,
+          predefined: false,
+          mode: "listener",
+          address: ":80",
+          delay: "0s",
+          proxyHeader: "Host",
+          webroot: "",
+        },
+      ],
+      certificates: [
+        {
+          name: "home",
+          isNew: true,
+          domains: [],
+          account: "primary",
+          challenge: "http-home",
+          challengeUnsupported: false,
+          keyType: "EC256",
+          renewDays: 0,
+          reuseKey: false,
+          disableRandomSleep: false,
+          disableARI: false,
+          ariWait: "0s",
+        },
+      ],
+      unsupportedFields: [],
+    };
+  }
+
+  const managedIds = new Set<string>(Object.values(managedFieldIds));
+  const unsupportedFields = projection
+    .filter(
+      (field) =>
+        managedIds.has(field.fieldId) && field.present && !field.configured,
+    )
+    .map<UnsupportedDraftField>((field) => ({
+      fieldId: field.fieldId,
+      bindings: field.bindings.map((binding) => ({ ...binding })),
+      kind: field.kind,
+      label: field.label,
+    }));
+
+  const accountNames = uniqueNames(projection, "account");
+  const challengeNames = uniqueNames(projection, "challenge");
+  const certificateNames = uniqueNames(projection, "certificate");
+  if (accountNames.length === 0 && certificateNames.length > 0) {
+    accountNames.push("noemail@example.com");
+  }
+  const hasProjectedCertificateChallenge = projection.some(
+    (field) =>
+      field.fieldId === managedFieldIds.certificateChallenge &&
+      field.configured &&
+      field.kind === "string" &&
+      field.value !== "",
+  );
+  if (
+    challengeNames.length === 0 &&
+    certificateNames.length > 0 &&
+    !hasProjectedCertificateChallenge
+  ) {
+    challengeNames.push("http-01");
+  }
+  const accounts = accountNames.map<AccountDraft>((name) => {
+    const bindings = bindingsFor("account", name);
+    const serverField = fieldFor(
+      projection,
+      managedFieldIds.accountServer,
+      bindings,
+    );
+    const keyTypeField = fieldFor(
+      projection,
+      managedFieldIds.accountKeyType,
+      bindings,
+    );
+    const nativeServer = stringValue(
+      projection,
+      managedFieldIds.accountServer,
+      bindings,
+      "letsencrypt",
+    );
+    const resolvedServer = resolveCA(nativeServer);
+    const unsupportedServer =
+      (serverField?.present && !serverField.configured) ||
+      (serverField?.configured === true && resolvedServer === undefined);
+    const hmac = fieldFor(projection, managedFieldIds.accountEabHmac, bindings);
+    const acceptsTerms = booleanValue(
+      projection,
+      managedFieldIds.accountTerms,
+      bindings,
+    );
+    return {
+      name,
+      isNew: false,
+      originalServer: unsupportedServer
+        ? ""
+        : (resolvedServer?.value ?? "letsencrypt"),
+      server: unsupportedServer ? "" : (resolvedServer?.value ?? "letsencrypt"),
+      originalAcceptsTerms: acceptsTerms,
+      email: stringValue(
+        projection,
+        managedFieldIds.accountEmail,
+        bindings,
+        "",
+      ),
+      keyType:
+        keyTypeField?.present && !keyTypeField.configured
+          ? ""
+          : acceptedKeyType(
+              stringValue(
+                projection,
+                managedFieldIds.accountKeyType,
+                bindings,
+                "EC256",
+              ),
+            ),
+      acceptsTerms,
+      eabKid: stringValue(
+        projection,
+        managedFieldIds.accountEabKid,
+        bindings,
+        "",
+      ),
+      eabHmac: { action: "keep" },
+      eabPresent: Boolean(hmac?.presenceKnown && hmac.present),
+    };
+  });
+  const challenges = challengeNames.map<HTTPChallengeDraft>((name) => {
+    const bindings = bindingsFor("challenge", name);
+    const webroot = stringValue(
+      projection,
+      managedFieldIds.challengeWebroot,
+      bindings,
+      "",
+    );
+    const predefined =
+      name === "http-01" &&
+      !projection.some(
+        (field) => bindingValue(field, "challenge") === name && field.present,
+      );
+    return {
+      name,
+      isNew: false,
+      predefined,
+      mode: webroot ? "webroot" : "listener",
+      address: stringValue(
+        projection,
+        managedFieldIds.challengeAddress,
+        bindings,
+        ":80",
+      ),
+      delay: stringValue(
+        projection,
+        managedFieldIds.challengeDelay,
+        bindings,
+        "0s",
+      ),
+      proxyHeader: stringValue(
+        projection,
+        managedFieldIds.challengeProxyHeader,
+        bindings,
+        "Host",
+      ),
+      webroot,
+    };
+  });
+  const certificates = certificateNames.map<CertificateDraft>((name) => {
+    const bindings = bindingsFor("certificate", name);
+    const keyTypeField = fieldFor(
+      projection,
+      managedFieldIds.certificateKeyType,
+      bindings,
+    );
+    const defaultAccount = accounts.length === 1 ? accounts[0]!.name : "";
+    const defaultChallenge = challenges.length === 1 ? challenges[0]!.name : "";
+    const accountField = fieldFor(
+      projection,
+      managedFieldIds.certificateAccount,
+      bindings,
+    );
+    const challengeField = fieldFor(
+      projection,
+      managedFieldIds.certificateChallenge,
+      bindings,
+    );
+    const account = stringValue(
+      projection,
+      managedFieldIds.certificateAccount,
+      bindings,
+      defaultAccount,
+    );
+    const challenge = stringValue(
+      projection,
+      managedFieldIds.certificateChallenge,
+      bindings,
+      defaultChallenge,
+    );
+    const inheritedKey =
+      accounts.find((item) => item.name === account)?.keyType ?? "EC256";
+    return {
+      name,
+      isNew: false,
+      domains: listValue(
+        projection,
+        managedFieldIds.certificateDomains,
+        bindings,
+      ),
+      account: accountField?.present && !accountField.configured ? "" : account,
+      challenge:
+        challengeField?.present && !challengeField.configured ? "" : challenge,
+      challengeUnsupported:
+        challenge !== "" && !challenges.some((item) => item.name === challenge),
+      keyType:
+        keyTypeField?.present && !keyTypeField.configured
+          ? ""
+          : acceptedKeyType(
+              stringValue(
+                projection,
+                managedFieldIds.certificateKeyType,
+                bindings,
+                inheritedKey || "EC256",
+              ),
+            ),
+      renewDays: integerValue(
+        projection,
+        managedFieldIds.certificateRenewDays,
+        bindings,
+      ),
+      reuseKey: booleanValue(
+        projection,
+        managedFieldIds.certificateRenewReuseKey,
+        bindings,
+      ),
+      disableRandomSleep: booleanValue(
+        projection,
+        managedFieldIds.certificateRenewDisableRandomSleep,
+        bindings,
+      ),
+      disableARI: booleanValue(
+        projection,
+        managedFieldIds.certificateRenewAriDisable,
+        bindings,
+      ),
+      ariWait: stringValue(
+        projection,
+        managedFieldIds.certificateRenewAriWait,
+        bindings,
+        "0s",
+      ),
+    };
+  });
+  return {
+    creation: false,
+    storage: stringValue(projection, managedFieldIds.storage, [], ".lego"),
+    accounts,
+    challenges,
+    certificates,
+    unsupportedFields,
+  };
+}
+
+export function unsupportedFieldControlId(
+  draft: NativeConfigurationDraft,
+  field: UnsupportedDraftField,
+): string {
+  if (field.fieldId === managedFieldIds.storage) {
+    return "configuration-storage";
+  }
+  const accountName = field.bindings.find(
+    (binding) => binding.id === "account",
+  )?.value;
+  if (accountName !== undefined) {
+    const index = draft.accounts.findIndex(
+      (account) => account.name === accountName,
+    );
+    const suffix: Partial<Record<string, string>> = {
+      [managedFieldIds.accountServer]: "server",
+      [managedFieldIds.accountEmail]: "email",
+      [managedFieldIds.accountKeyType]: "key-type",
+      [managedFieldIds.accountTerms]: "terms",
+      [managedFieldIds.accountEabKid]: "eab-kid",
+      [managedFieldIds.accountEabHmac]: "eab-hmac",
+    };
+    if (index >= 0 && suffix[field.fieldId]) {
+      return `account-${index}-${suffix[field.fieldId]}`;
+    }
+  }
+  const challengeName = field.bindings.find(
+    (binding) => binding.id === "challenge",
+  )?.value;
+  if (challengeName !== undefined) {
+    const index = draft.challenges.findIndex(
+      (challenge) => challenge.name === challengeName,
+    );
+    const suffix: Partial<Record<string, string>> = {
+      [managedFieldIds.challengeAddress]: "address",
+      [managedFieldIds.challengeDelay]: "delay",
+      [managedFieldIds.challengeProxyHeader]: "proxy-header",
+      [managedFieldIds.challengeWebroot]: "webroot",
+    };
+    if (index >= 0 && suffix[field.fieldId]) {
+      return `challenge-${index}-${suffix[field.fieldId]}`;
+    }
+  }
+  const certificateName = field.bindings.find(
+    (binding) => binding.id === "certificate",
+  )?.value;
+  if (certificateName !== undefined) {
+    const index = draft.certificates.findIndex(
+      (certificate) => certificate.name === certificateName,
+    );
+    const suffix: Partial<Record<string, string>> = {
+      [managedFieldIds.certificateDomains]: "domains",
+      [managedFieldIds.certificateAccount]: "account",
+      [managedFieldIds.certificateChallenge]: "challenge",
+      [managedFieldIds.certificateKeyType]: "key-type",
+      [managedFieldIds.certificateRenewDays]: "renew-days",
+      [managedFieldIds.certificateRenewReuseKey]: "renew-reuse-key",
+      [managedFieldIds.certificateRenewDisableRandomSleep]:
+        "renew-disable-random-sleep",
+      [managedFieldIds.certificateRenewAriDisable]: "renew-disable-ari",
+      [managedFieldIds.certificateRenewAriWait]: "ari-wait",
+    };
+    if (index >= 0 && suffix[field.fieldId]) {
+      return `certificate-${index}-${suffix[field.fieldId]}`;
+    }
+  }
+  return "managed-configuration-heading";
+}
+
+export function canAcknowledgeUnsupportedField(
+  draft: NativeConfigurationDraft,
+  field: UnsupportedDraftField,
+): boolean {
+  const accountName = field.bindings.find(
+    (binding) => binding.id === "account",
+  )?.value;
+  const account = draft.accounts.find((item) => item.name === accountName);
+  if (account) {
+    if (field.fieldId === managedFieldIds.accountServer) {
+      return resolveCA(account.server) !== undefined;
+    }
+    if (field.fieldId === managedFieldIds.accountKeyType) {
+      return keyTypeOptions.includes(account.keyType as SupportedKeyType);
+    }
+    if (field.fieldId === managedFieldIds.accountEabHmac) {
+      return account.eabHmac.action !== "keep";
+    }
+  }
+  const certificateName = field.bindings.find(
+    (binding) => binding.id === "certificate",
+  )?.value;
+  const certificate = draft.certificates.find(
+    (item) => item.name === certificateName,
+  );
+  if (certificate) {
+    if (field.fieldId === managedFieldIds.certificateDomains) {
+      return certificate.domains.length > 0;
+    }
+    if (field.fieldId === managedFieldIds.certificateAccount) {
+      return certificate.account !== "";
+    }
+    if (field.fieldId === managedFieldIds.certificateChallenge) {
+      return certificate.challenge !== "";
+    }
+    if (field.fieldId === managedFieldIds.certificateKeyType) {
+      return keyTypeOptions.includes(certificate.keyType as SupportedKeyType);
+    }
+  }
+  return true;
+}
+
+function equalValue(left: ConfigurationValue, right: ConfigurationValue) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function emitValue(
+  changes: ConfigurationChange[],
+  projection: ProjectedField[],
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+  value: ConfigurationValue,
+  implicit: ConfigurationValue | undefined,
+  force: boolean,
+) {
+  const existing = fieldFor(projection, fieldId, bindings);
+  const current =
+    existing && existing.configured && existing.kind !== "secret"
+      ? existing.value
+      : undefined;
+  if (
+    current !== undefined &&
+    equalValue(current, value) &&
+    (!force || existing?.present === true)
+  ) {
+    return;
+  }
+  if (
+    !force &&
+    current === undefined &&
+    existing?.present !== true &&
+    implicit !== undefined &&
+    equalValue(implicit, value)
+  ) {
+    return;
+  }
+  changes.push({ fieldId, bindings, operation: "set", value });
+}
+
+function emitOptional(
+  changes: ConfigurationChange[],
+  projection: ProjectedField[],
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+  value: ConfigurationValue,
+  empty: ConfigurationValue,
+) {
+  const existing = fieldFor(projection, fieldId, bindings);
+  const current =
+    existing && existing.configured && existing.kind !== "secret"
+      ? existing.value
+      : undefined;
+  if (current !== undefined && equalValue(current, value)) {
+    return;
+  }
+  if (equalValue(value, empty)) {
+    if (existing?.present) {
+      changes.push({ fieldId, bindings, operation: "remove" });
+    }
+    return;
+  }
+  emitValue(changes, projection, fieldId, bindings, value, empty, false);
+}
+
+function emitOptionalOrRequired(
+  changes: ConfigurationChange[],
+  projection: ProjectedField[],
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+  value: ConfigurationValue,
+  empty: ConfigurationValue,
+  required: boolean,
+) {
+  if (required) {
+    emitValue(changes, projection, fieldId, bindings, value, empty, true);
+    return;
+  }
+  emitOptional(changes, projection, fieldId, bindings, value, empty);
+}
+
+function emitRemovalIfPresent(
+  changes: ConfigurationChange[],
+  projection: ProjectedField[],
+  fieldId: string,
+  bindings: ConfigurationBinding[],
+) {
+  if (fieldFor(projection, fieldId, bindings)?.present) {
+    changes.push({ fieldId, bindings, operation: "remove" });
+  }
+}
+
+export function changesFromDraft(
+  draft: NativeConfigurationDraft,
+  projection: ProjectedField[],
+  creation: boolean,
+): ConfigurationChange[] {
+  const changes: ConfigurationChange[] = [];
+  emitValue(
+    changes,
+    projection,
+    managedFieldIds.storage,
+    [],
+    draft.storage,
+    ".lego",
+    creation,
+  );
+  for (const account of draft.accounts) {
+    const bindings = bindingsFor("account", account.name);
+    const force = creation || account.isNew;
+    const registrationTransition =
+      account.isNew || account.server !== account.originalServer;
+    const serverField = fieldFor(
+      projection,
+      managedFieldIds.accountServer,
+      bindings,
+    );
+    const existingServer = publicValue(
+      projection,
+      managedFieldIds.accountServer,
+      bindings,
+    );
+    const sameAcceptedServer =
+      serverField?.present === true &&
+      typeof existingServer === "string" &&
+      resolveCA(existingServer)?.value === account.server;
+    if (serverField?.present !== true) {
+      changes.push({
+        fieldId: managedFieldIds.accountServer,
+        bindings,
+        operation: "set",
+        value: account.server,
+      });
+    } else if (!sameAcceptedServer) {
+      emitValue(
+        changes,
+        projection,
+        managedFieldIds.accountServer,
+        bindings,
+        account.server,
+        "letsencrypt",
+        force,
+      );
+    }
+    emitOptional(
+      changes,
+      projection,
+      managedFieldIds.accountEmail,
+      bindings,
+      account.email,
+      "",
+    );
+    emitValue(
+      changes,
+      projection,
+      managedFieldIds.accountKeyType,
+      bindings,
+      account.keyType,
+      "EC256",
+      force,
+    );
+    if (registrationTransition) {
+      changes.push({
+        fieldId: managedFieldIds.accountTerms,
+        bindings,
+        operation: "set",
+        value: account.acceptsTerms,
+      });
+    } else {
+      emitValue(
+        changes,
+        projection,
+        managedFieldIds.accountTerms,
+        bindings,
+        account.acceptsTerms,
+        false,
+        force,
+      );
+    }
+    if (registrationTransition && account.eabKid !== "") {
+      changes.push({
+        fieldId: managedFieldIds.accountEabKid,
+        bindings,
+        operation: "set",
+        value: account.eabKid,
+      });
+    } else {
+      emitOptional(
+        changes,
+        projection,
+        managedFieldIds.accountEabKid,
+        bindings,
+        account.eabKid,
+        "",
+      );
+    }
+    if (account.eabHmac.action === "replace") {
+      changes.push({
+        fieldId: managedFieldIds.accountEabHmac,
+        bindings,
+        operation: "set",
+        value: account.eabHmac.secret,
+      });
+    } else if (account.eabHmac.action === "remove" && account.eabPresent) {
+      changes.push({
+        fieldId: managedFieldIds.accountEabHmac,
+        bindings,
+        operation: "remove",
+      });
+    }
+  }
+  for (const challenge of draft.challenges) {
+    const bindings = bindingsFor("challenge", challenge.name);
+    const force = creation || challenge.isNew || challenge.predefined;
+    emitOptionalOrRequired(
+      changes,
+      projection,
+      managedFieldIds.challengeDelay,
+      bindings,
+      challenge.delay,
+      "0s",
+      force,
+    );
+    if (challenge.mode === "listener") {
+      emitValue(
+        changes,
+        projection,
+        managedFieldIds.challengeAddress,
+        bindings,
+        challenge.address,
+        ":80",
+        force ||
+          fieldFor(projection, managedFieldIds.challengeAddress, bindings)
+            ?.present !== true ||
+          fieldFor(projection, managedFieldIds.challengeWebroot, bindings)
+            ?.present === true,
+      );
+      emitOptional(
+        changes,
+        projection,
+        managedFieldIds.challengeProxyHeader,
+        bindings,
+        challenge.proxyHeader,
+        "Host",
+      );
+      emitRemovalIfPresent(
+        changes,
+        projection,
+        managedFieldIds.challengeWebroot,
+        bindings,
+      );
+    } else {
+      emitValue(
+        changes,
+        projection,
+        managedFieldIds.challengeWebroot,
+        bindings,
+        challenge.webroot,
+        "",
+        force,
+      );
+      emitRemovalIfPresent(
+        changes,
+        projection,
+        managedFieldIds.challengeAddress,
+        bindings,
+      );
+      emitRemovalIfPresent(
+        changes,
+        projection,
+        managedFieldIds.challengeProxyHeader,
+        bindings,
+      );
+    }
+  }
+  for (const certificate of draft.certificates) {
+    const bindings = bindingsFor("certificate", certificate.name);
+    const force = creation || certificate.isNew;
+    emitValue(
+      changes,
+      projection,
+      managedFieldIds.certificateDomains,
+      bindings,
+      certificate.domains,
+      undefined,
+      force,
+    );
+    if (
+      fieldFor(projection, managedFieldIds.certificateAccount, bindings)
+        ?.present !== true
+    ) {
+      changes.push({
+        fieldId: managedFieldIds.certificateAccount,
+        bindings,
+        operation: "set",
+        value: certificate.account,
+      });
+    } else {
+      emitValue(
+        changes,
+        projection,
+        managedFieldIds.certificateAccount,
+        bindings,
+        certificate.account,
+        draft.accounts.length === 1 ? draft.accounts[0]!.name : undefined,
+        force,
+      );
+    }
+    const challengeField = fieldFor(
+      projection,
+      managedFieldIds.certificateChallenge,
+      bindings,
+    );
+    if (certificate.challengeUnsupported) {
+      emitValue(
+        changes,
+        projection,
+        managedFieldIds.certificateChallenge,
+        bindings,
+        certificate.challenge,
+        certificate.challenge,
+        false,
+      );
+    } else if (challengeField?.present !== true) {
+      changes.push({
+        fieldId: managedFieldIds.certificateChallenge,
+        bindings,
+        operation: "set",
+        value: certificate.challenge,
+      });
+    } else {
+      emitValue(
+        changes,
+        projection,
+        managedFieldIds.certificateChallenge,
+        bindings,
+        certificate.challenge,
+        draft.challenges.length === 1 ? draft.challenges[0]!.name : undefined,
+        force,
+      );
+    }
+    const inheritedKey =
+      draft.accounts.find((account) => account.name === certificate.account)
+        ?.keyType ?? "EC256";
+    emitValue(
+      changes,
+      projection,
+      managedFieldIds.certificateKeyType,
+      bindings,
+      certificate.keyType,
+      inheritedKey,
+      force,
+    );
+    emitOptionalOrRequired(
+      changes,
+      projection,
+      managedFieldIds.certificateRenewDays,
+      bindings,
+      certificate.renewDays,
+      0,
+      force,
+    );
+    emitOptionalOrRequired(
+      changes,
+      projection,
+      managedFieldIds.certificateRenewReuseKey,
+      bindings,
+      certificate.reuseKey,
+      false,
+      force,
+    );
+    emitOptionalOrRequired(
+      changes,
+      projection,
+      managedFieldIds.certificateRenewDisableRandomSleep,
+      bindings,
+      certificate.disableRandomSleep,
+      false,
+      force,
+    );
+    emitOptionalOrRequired(
+      changes,
+      projection,
+      managedFieldIds.certificateRenewAriDisable,
+      bindings,
+      certificate.disableARI,
+      false,
+      force,
+    );
+    emitOptionalOrRequired(
+      changes,
+      projection,
+      managedFieldIds.certificateRenewAriWait,
+      bindings,
+      certificate.ariWait,
+      "0s",
+      force,
+    );
+  }
+  return changes;
+}
+
+const entityNamePattern = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$/;
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const domainLabel = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+const domainPattern = new RegExp(`^(?:${domainLabel}\\.)+${domainLabel}$`);
+
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function validIPv4(value: string): boolean {
+  const parts = value.split(".");
+  return (
+    parts.length === 4 &&
+    parts.every(
+      (part) =>
+        /^\d{1,3}$/.test(part) &&
+        (part === "0" || !part.startsWith("0")) &&
+        Number(part) <= 255,
+    )
+  );
+}
+
+function validIPv6(value: string): boolean {
+  if (!/^[0-9A-Fa-f:.]+$/.test(value)) return false;
+  try {
+    return new URL(`http://[${value}]/`).hostname.startsWith("[");
+  } catch {
+    return false;
+  }
+}
+
+function validListenerAddress(value: string): boolean {
+  if (byteLength(value) > 256) return false;
+  const match =
+    /^(?:(\d{1,3}(?:\.\d{1,3}){3})|\[([0-9A-Fa-f:.]+)\])?:(\d{1,5})$/.exec(
+      value,
+    );
+  if (!match) return false;
+  if (match[1] !== undefined && !validIPv4(match[1])) return false;
+  if (match[2] !== undefined && !validIPv6(match[2])) return false;
+  const port = Number(match[3]);
+  return port >= 1 && port <= 65535;
+}
+
+function durationMilliseconds(value: string): number | null {
+  let source = value;
+  let sign = 1;
+  if (source.startsWith("+") || source.startsWith("-")) {
+    if (source[0] === "-") sign = -1;
+    source = source.slice(1);
+  }
+  if (source.length === 0) return null;
+  if (source === "0") return sign * 0;
+  const matcher = /((?:\d+(?:\.\d*)?|\.\d+))(ns|us|µs|μs|ms|s|m|h)/g;
+  const scales: Record<string, number> = {
+    ns: 0.000001,
+    us: 0.001,
+    µs: 0.001,
+    μs: 0.001,
+    ms: 1,
+    s: 1000,
+    m: 60_000,
+    h: 3_600_000,
+  };
+  let matched = "";
+  let total = 0;
+  for (const item of source.matchAll(matcher)) {
+    matched += item[0];
+    total += Number(item[1]) * scales[item[2]!]!;
+  }
+  return matched === source && Number.isFinite(total) ? sign * total : null;
+}
+
+function safeNativePath(value: string): boolean {
+  return (
+    value.length > 0 &&
+    byteLength(value) <= 4095 &&
+    !Array.from(value).some((character) => {
+      const point = character.codePointAt(0) ?? 0;
+      return point < 0x20 || point === 0x7f;
+    })
+  );
+}
+
+function validBase64URL(value: string): boolean {
+  if (!/^[A-Za-z0-9_-]+={0,2}$/.test(value)) return false;
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  const rawLength = value.length - padding;
+  if (padding > 0 && value.length % 4 !== 0) return false;
+  if (padding === 1 && rawLength % 4 !== 3) return false;
+  if (padding === 2 && rawLength % 4 !== 2) return false;
+  return rawLength % 4 !== 1;
+}
+
+function canonicalMIMEHeader(value: string): string {
+  let upper = true;
+  let result = "";
+  for (const character of value) {
+    if (upper && character >= "a" && character <= "z") {
+      result += character.toUpperCase();
+    } else if (!upper && character >= "A" && character <= "Z") {
+      result += character.toLowerCase();
+    } else {
+      result += character;
+    }
+    upper = character === "-";
+  }
+  return result;
+}
+
+function validProxyHeader(value: string): boolean {
+  return (
+    value === "" ||
+    (byteLength(value) <= 64 &&
+      /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(value) &&
+      canonicalMIMEHeader(value) === value)
+  );
+}
+
+function duplicateNames(items: { name: string }[]): Set<string> {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const item of items) {
+    if (seen.has(item.name)) duplicates.add(item.name);
+    seen.add(item.name);
+  }
+  return duplicates;
+}
+
+export function validateDraft(draft: NativeConfigurationDraft): DraftIssue[] {
+  const issues: DraftIssue[] = draft.unsupportedFields.map((field) => ({
+    fieldId: unsupportedFieldControlId(draft, field),
+    message:
+      "An unsupported native value is retained and hidden. Explicitly choose the supported replacement before preview.",
+  }));
+  if (!safeNativePath(draft.storage)) {
+    issues.push({
+      fieldId: "configuration-storage",
+      message: "Enter a native storage path no longer than 4095 bytes.",
+    });
+  }
+  const groups = [
+    ["account", draft.accounts],
+    ["challenge", draft.challenges],
+    ["certificate", draft.certificates],
+  ] as const;
+  for (const [kind, items] of groups) {
+    if (
+      draft.creation &&
+      items.length === 0 &&
+      !(
+        kind === "challenge" &&
+        draft.certificates.length > 0 &&
+        draft.certificates.every(
+          (certificate) => certificate.challengeUnsupported,
+        )
+      )
+    ) {
+      issues.push({
+        fieldId: `${kind}-add`,
+        message: `Add at least one ${kind}.`,
+      });
+    }
+    const duplicates = duplicateNames(items);
+    items.forEach((item, index) => {
+      if (!entityNamePattern.test(item.name)) {
+        issues.push({
+          fieldId: `${kind}-${index}-name`,
+          message: `${kind[0]!.toUpperCase()}${kind.slice(1)} names use 1-64 letters, numbers, dots, underscores, @ signs, or hyphens.`,
+        });
+      } else if (duplicates.has(item.name)) {
+        issues.push({
+          fieldId: `${kind}-${index}-name`,
+          message: `${item.name} is duplicated.`,
+        });
+      }
+    });
+  }
+  draft.accounts.forEach((account, index) => {
+    const ca = resolveCA(account.server);
+    if (!ca) {
+      issues.push({
+        fieldId: `account-${index}-server`,
+        message: "Choose one supported CA endpoint.",
+      });
+      return;
+    }
+    if (!keyTypeOptions.includes(account.keyType as SupportedKeyType)) {
+      issues.push({
+        fieldId: `account-${index}-key-type`,
+        message:
+          "The hidden native account key type is unsupported. Choose a supported replacement.",
+      });
+    }
+    if (
+      !account.isNew &&
+      ((account.originalServer === "sslcomrsa" &&
+        account.server === "sslcomecc") ||
+        (account.originalServer === "sslcomecc" &&
+          account.server === "sslcomrsa"))
+    ) {
+      issues.push({
+        fieldId: `account-${index}-server`,
+        message:
+          "SSL.com RSA and ECDSA share native account storage. Add a new account for the other endpoint, then reassign certificates.",
+      });
+    }
+    if (
+      account.email &&
+      (byteLength(account.email) > 254 ||
+        account.email.trim() !== account.email ||
+        !emailPattern.test(account.email))
+    ) {
+      issues.push({
+        fieldId: `account-${index}-email`,
+        message: "Enter a valid account email address.",
+      });
+    }
+    const prerequisitesRequired =
+      account.isNew || account.server !== account.originalServer;
+    if (
+      prerequisitesRequired &&
+      (ca.value === "letsencrypt" || ca.value === "letsencrypt-staging") &&
+      !account.email
+    ) {
+      issues.push({
+        fieldId: `account-${index}-email`,
+        message:
+          "Let's Encrypt account registration requires an email address.",
+      });
+    }
+    if (prerequisitesRequired && !account.acceptsTerms) {
+      issues.push({
+        fieldId: `account-${index}-terms`,
+        message: "Acknowledge the CA terms before saving.",
+      });
+    }
+    const retainedHmacAvailable =
+      (account.eabHmac.action === "keep" && account.eabPresent) ||
+      (account.eabHmac.action === "replace" &&
+        account.eabHmac.secret.length > 0);
+    const hmacAvailable = prerequisitesRequired
+      ? account.eabHmac.action === "replace" &&
+        account.eabHmac.secret.length > 0
+      : retainedHmacAvailable;
+    const eabStarted = account.eabKid.length > 0 || hmacAvailable;
+    if (account.eabKid && byteLength(account.eabKid) > 4096) {
+      issues.push({
+        fieldId: `account-${index}-eab-kid`,
+        message: "The EAB key identifier must be no longer than 4096 bytes.",
+      });
+    }
+    if (
+      ca.eab === "none" &&
+      (account.eabKid.length > 0 || retainedHmacAvailable)
+    ) {
+      issues.push({
+        fieldId: `account-${index}-eab-kid`,
+        message:
+          "Let's Encrypt does not accept EAB input. Clear the key identifier and remove the hidden HMAC value.",
+      });
+    } else if ((prerequisitesRequired && ca.eab === "required") || eabStarted) {
+      if (!account.eabKid) {
+        issues.push({
+          fieldId: `account-${index}-eab-kid`,
+          message: "Enter the EAB key identifier.",
+        });
+      }
+      if (!hmacAvailable || account.eabHmac.action === "remove") {
+        issues.push({
+          fieldId: `account-${index}-eab-hmac-replacement`,
+          message: "Provide the write-only EAB HMAC value.",
+        });
+      }
+    }
+    if (
+      account.eabHmac.action === "replace" &&
+      (account.eabHmac.secret.length > 8192 ||
+        !validBase64URL(account.eabHmac.secret))
+    ) {
+      issues.push({
+        fieldId: "account-" + String(index) + "-eab-hmac-replacement",
+        message:
+          "The write-only EAB HMAC must be nonempty base64url with valid optional padding.",
+      });
+    }
+    if (
+      prerequisitesRequired &&
+      ca.value === "zerossl" &&
+      !account.email &&
+      !eabStarted
+    ) {
+      issues.push({
+        fieldId: `account-${index}-email`,
+        message: "ZeroSSL needs an account email or explicit EAB credentials.",
+      });
+    }
+  });
+  draft.challenges.forEach((challenge, index) => {
+    if (
+      challenge.mode === "listener" &&
+      !validListenerAddress(challenge.address)
+    ) {
+      issues.push({
+        fieldId: `challenge-${index}-address`,
+        message:
+          "Use an empty, literal IPv4, or bracketed IPv6 host with a port, such as :8080 or 127.0.0.1:8080.",
+      });
+    }
+    if (
+      challenge.mode === "listener" &&
+      !validProxyHeader(challenge.proxyHeader)
+    ) {
+      issues.push({
+        fieldId: `challenge-${index}-proxy-header`,
+        message:
+          "Use an optional canonical HTTP field name such as Host, Forwarded, or X-Forwarded-Host.",
+      });
+    }
+    const delay = durationMilliseconds(challenge.delay);
+    if (
+      byteLength(challenge.delay) > 64 ||
+      delay === null ||
+      delay < 0 ||
+      delay > 10 * 60_000
+    ) {
+      issues.push({
+        fieldId: `challenge-${index}-delay`,
+        message:
+          "Use a nonnegative Go duration no longer than 10m, such as 0s, 500ms, or 1m30s.",
+      });
+    }
+    if (challenge.mode === "webroot" && !safeNativePath(challenge.webroot)) {
+      issues.push({
+        fieldId: `challenge-${index}-webroot`,
+        message:
+          "Webroot must be a bounded native path; relative values resolve from the working directory before the server safety audit.",
+      });
+    }
+  });
+  draft.certificates.forEach((certificate, index) => {
+    if (!keyTypeOptions.includes(certificate.keyType as SupportedKeyType)) {
+      issues.push({
+        fieldId: `certificate-${index}-key-type`,
+        message:
+          "The hidden native certificate key type is unsupported. Choose a supported replacement.",
+      });
+    }
+    if (certificate.domains.length === 0) {
+      issues.push({
+        fieldId: `certificate-${index}-domains`,
+        message: "Enter at least one DNS name.",
+      });
+    } else if (certificate.domains.length > 100) {
+      issues.push({
+        fieldId: `certificate-${index}-domains`,
+        message: "Enter no more than 100 DNS names.",
+      });
+    }
+    const seen = new Set<string>();
+    for (const domain of certificate.domains) {
+      const candidate = domain.startsWith("*.") ? domain.slice(2) : domain;
+      if (
+        !domainPattern.test(candidate) ||
+        candidate !== candidate.toLowerCase() ||
+        byteLength(domain) > 253 ||
+        validIPv4(candidate)
+      ) {
+        issues.push({
+          fieldId: `certificate-${index}-domains`,
+          message: `${domain || "An empty entry"} is not a lowercase DNS A-label name.`,
+        });
+      }
+      if (seen.has(domain)) {
+        issues.push({
+          fieldId: `certificate-${index}-domains`,
+          message: `${domain} appears more than once.`,
+        });
+      }
+      seen.add(domain);
+      if (
+        domain.startsWith("*.") &&
+        draft.challenges.some(
+          (challenge) => challenge.name === certificate.challenge,
+        )
+      ) {
+        issues.push({
+          fieldId: `certificate-${index}-domains`,
+          message:
+            "HTTP-01 cannot validate wildcard DNS names. Use a supported DNS-01 integration instead.",
+        });
+      }
+    }
+    if (
+      !draft.accounts.some((account) => account.name === certificate.account)
+    ) {
+      issues.push({
+        fieldId: `certificate-${index}-account`,
+        message: "Choose an account defined above.",
+      });
+    }
+    if (
+      !certificate.challengeUnsupported &&
+      !draft.challenges.some(
+        (challenge) => challenge.name === certificate.challenge,
+      )
+    ) {
+      issues.push({
+        fieldId: `certificate-${index}-challenge`,
+        message: "Choose an HTTP-01 challenge defined above.",
+      });
+    }
+    if (
+      !Number.isSafeInteger(certificate.renewDays) ||
+      certificate.renewDays < 0 ||
+      certificate.renewDays > 365
+    ) {
+      issues.push({
+        fieldId: `certificate-${index}-renew-days`,
+        message: "Renewal days must be 0 through 365.",
+      });
+    }
+    const ariWait = durationMilliseconds(certificate.ariWait);
+    if (
+      byteLength(certificate.ariWait) > 64 ||
+      ariWait === null ||
+      ariWait < 0 ||
+      ariWait > 10 * 60_000
+    ) {
+      issues.push({
+        fieldId: `certificate-${index}-ari-wait`,
+        message:
+          "Use a nonnegative Go duration no longer than 10m, such as 0s, 30s, or 5m.",
+      });
+    }
+  });
+  return issues;
+}
+
+export function nextEntityName(prefix: string, existing: { name: string }[]) {
+  const names = new Set(existing.map((item) => item.name));
+  if (!names.has(prefix)) return prefix;
+  for (let suffix = 2; suffix <= 999; suffix += 1) {
+    if (!names.has(`${prefix}-${suffix}`)) return `${prefix}-${suffix}`;
+  }
+  return `${prefix}-new`;
+}

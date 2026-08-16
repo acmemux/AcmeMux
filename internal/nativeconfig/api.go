@@ -76,6 +76,7 @@ type IssueClass string
 const (
 	IssueSchema      IssueClass = "schema"
 	IssueSemantic    IssueClass = "semantic"
+	IssueConstraint  IssueClass = "constraint"
 	IssueUnsupported IssueClass = "unsupported"
 	IssueUnknown     IssueClass = "unknown"
 )

@@ -51,10 +51,12 @@ func (store *JournalStore) Create(ctx context.Context, journal Journal) error {
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_edit_journal (
-singleton_id, transaction_id, phase, working_directory, configuration_path, created_at_utc
-) VALUES (?, ?, ?, ?, ?, ?)`,
+singleton_id, transaction_id, phase, working_directory, configuration_path, created_at_utc,
+bootstrap, configuration_source
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		storeSelectionID, journal.TransactionID, string(journal.Phase), journal.WorkingDirectory,
-		journal.ConfigurationPath, formatStoreTime(journal.CreatedAt),
+		journal.ConfigurationPath, formatStoreTime(journal.CreatedAt), boolInteger(journal.Bootstrap),
+		string(journal.ConfigurationSource),
 	); err != nil {
 		return fmt.Errorf("create native edit journal: %w", err)
 	}
@@ -93,11 +95,14 @@ func (store *JournalStore) Load(ctx context.Context) (Journal, error) {
 		working       string
 		configuration string
 		created       string
+		bootstrap     int64
+		source        string
 	)
 	err = tx.QueryRowContext(ctx, `SELECT transaction_id, phase, working_directory,
-configuration_path, created_at_utc FROM workspace_edit_journal WHERE singleton_id = ?`,
+configuration_path, created_at_utc, bootstrap, configuration_source
+FROM workspace_edit_journal WHERE singleton_id = ?`,
 		storeSelectionID,
-	).Scan(&transactionID, &phase, &working, &configuration, &created)
+	).Scan(&transactionID, &phase, &working, &configuration, &created, &bootstrap, &source)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Journal{}, ErrNoEditJournal
 	}
@@ -108,9 +113,14 @@ configuration_path, created_at_utc FROM workspace_edit_journal WHERE singleton_i
 	if err != nil {
 		return Journal{}, fmt.Errorf("invalid native edit journal creation time")
 	}
+	bootstrapValue, err := storedBoolean(bootstrap, "bootstrap")
+	if err != nil {
+		return Journal{}, fmt.Errorf("invalid native edit journal bootstrap marker")
+	}
 	journal := Journal{
 		TransactionID: transactionID, Phase: JournalPhase(phase), WorkingDirectory: working,
-		ConfigurationPath: configuration, CreatedAt: createdAt,
+		ConfigurationPath: configuration, CreatedAt: createdAt, Bootstrap: bootstrapValue,
+		ConfigurationSource: ConfigurationSource(source),
 	}
 	rows, err := tx.QueryContext(ctx, loadJournalFilesSQL, storeSelectionID)
 	if err != nil {
@@ -421,6 +431,15 @@ func validateJournal(journal Journal) error {
 	if err := validateCanonicalStorePath(journal.ConfigurationPath); err != nil {
 		return errors.New("journal configuration path is invalid")
 	}
+	if journal.Bootstrap && journal.ConfigurationSource != ConfigurationExplicit &&
+		journal.ConfigurationSource != ConfigurationConventionalYML && journal.ConfigurationSource != ConfigurationConventionalYAML {
+		return errors.New("bootstrap journal configuration source is invalid")
+	}
+	if !journal.Bootstrap && journal.ConfigurationSource != "" &&
+		journal.ConfigurationSource != ConfigurationExplicit && journal.ConfigurationSource != ConfigurationConventionalYML &&
+		journal.ConfigurationSource != ConfigurationConventionalYAML {
+		return errors.New("journal configuration source is invalid")
+	}
 	if err := validateStoreTime(journal.CreatedAt); err != nil {
 		return errors.New("journal creation time is invalid")
 	}
@@ -465,6 +484,9 @@ func validateJournal(journal Journal) error {
 		if !file.Original.Exists && !zeroMissingIdentity(file.Original) {
 			return errors.New("journal missing identity is invalid")
 		}
+		if journal.Bootstrap && file.Original.Exists {
+			return errors.New("bootstrap journal target already existed")
+		}
 		if file.CandidateReady != file.Candidate.Exists || file.CandidateReady && !validCandidateIdentity(file.Candidate) {
 			return errors.New("journal candidate identity is invalid")
 		}
@@ -472,7 +494,7 @@ func validateJournal(journal Journal) error {
 			return errors.New("journal candidate state is invalid")
 		}
 	}
-	if configurationCount > 1 {
+	if configurationCount > 1 || journal.Bootstrap && configurationCount != 1 {
 		return errors.New("journal contains multiple configuration targets")
 	}
 	return nil

@@ -235,14 +235,21 @@ func (service *Service) ResolveRecovery(
 	var validator workspace.RecoveryValidator
 	if resolution == workspace.ResolutionFinalizeApplied || resolution == workspace.ResolutionAdoptCurrent {
 		validator = func(_ context.Context, sources *workspace.SourceSet) error {
-			inspection, inspectErr := runtime.engine.Inspect(sources.Configuration.Content)
+			var inspection nativeconfig.Inspection
+			var inspectErr error
+			if recovery.Bootstrap {
+				inspection, inspectErr = runtime.engine.InspectCreation(sources.Configuration.Content)
+			} else {
+				inspection, inspectErr = runtime.engine.Inspect(sources.Configuration.Content)
+			}
 			if inspectErr != nil {
 				return ErrInvalid
 			}
 			documents := loadDotenvDocuments(inspection, sources, false)
 			defer documents.close()
 			inspection = applyDotenvPresence(inspection, documents)
-			if documents.invalid || !inspection.SchemaValid || !inspection.SemanticValid || !inspection.Replaceable {
+			state, editing, _ := configurationState(inspection, documents)
+			if !editing || state == StateInvalid {
 				return ErrInvalid
 			}
 			return nil
@@ -288,6 +295,20 @@ func (service *Service) snapshotLocked(ctx context.Context, lease *workspace.Lea
 		defer evaluated.close()
 		return evaluated.view, nil
 	}
+	if errors.Is(err, workspace.ErrNoSelection) {
+		runtime, runtimeErr := service.loadRuntime(ctx)
+		if runtimeErr != nil {
+			return View{}, runtimeErr
+		}
+		return View{
+			State: StateCreationRequired,
+			Source: Source{
+				BaseRevisionToken: service.creationBaseToken(runtime), DotenvPaths: []string{},
+				RuntimeManifestID: runtime.manifestID,
+			},
+			Diagnostics: []Diagnostic{},
+		}, nil
+	}
 	if !errors.Is(err, workspace.ErrRecoveryRequired) {
 		return View{}, err
 	}
@@ -330,6 +351,9 @@ func (service *Service) evaluateLocked(ctx context.Context, lease *workspace.Lea
 	sources, err := service.transactions.Snapshot(ctx, lease)
 	if err != nil {
 		if errors.Is(err, workspace.ErrRecoveryRequired) {
+			return nil, err
+		}
+		if errors.Is(err, workspace.ErrNoSelection) {
 			return nil, err
 		}
 		if errors.Is(err, workspace.ErrSourceChanged) {
@@ -449,7 +473,7 @@ func (service *Service) prepareCandidate(
 	prepared.resultState = state
 	prepared.execution = execution
 	prepared.diagnostics = diagnostics
-	if !editing {
+	if !editing || state == StateInvalid {
 		prepared.state = PreviewInvalid
 		complete = true
 		return prepared, nil
@@ -475,13 +499,19 @@ func configurationState(inspection nativeconfig.Inspection, documents *dotenvDoc
 		return StateInvalid, false, false
 	}
 	unsupported := documents.unsupported
+	constraint := false
 	for _, issue := range inspection.Issues {
 		if issue.Class == nativeconfig.IssueUnsupported || issue.Class == nativeconfig.IssueUnknown {
 			unsupported = true
 		}
+		if issue.Class == nativeconfig.IssueConstraint {
+			constraint = true
+		}
 	}
 	state := StateReady
-	if unsupported {
+	if constraint {
+		state = StateInvalid
+	} else if unsupported {
 		state = StateUnsupported
 	}
 	return state, inspection.Replaceable && !documents.invalid, inspection.Executable && !documents.invalid && !documents.unsupported
@@ -499,6 +529,9 @@ func diagnosticsForInspection(inspection nativeconfig.Inspection) []Diagnostic {
 			diagnostic.Code = CodeSchemaValidationFailed
 			diagnostic.Role = RoleSchema
 		case nativeconfig.IssueSemantic:
+			diagnostic.Code = CodeSemanticValidationFailed
+			diagnostic.Role = RoleSemantic
+		case nativeconfig.IssueConstraint:
 			diagnostic.Code = CodeSemanticValidationFailed
 			diagnostic.Role = RoleSemantic
 		case nativeconfig.IssueUnknown:

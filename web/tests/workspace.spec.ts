@@ -30,12 +30,15 @@ test("reviews every native path before adopting a conventional workspace", async
   });
   await expect(heading).toBeVisible();
   await expect(heading).toBeFocused();
-  await expect(page.getByText(/Conventional \.lego\.yml/)).toBeVisible();
-  await expect(page.getByText("./cloudflare.env")).toBeVisible();
-  await expect(page.getByText("/srv/lego/cloudflare.env")).toBeVisible();
-  await expect(page.getByText("./public")).toBeVisible();
-  await expect(page.getByText("/srv/lego/public")).toBeVisible();
-  await expect(page.getByText("uid 991 / gid 991").first()).toBeVisible();
+  const review = page.getByRole("region", {
+    name: "Review native workspace evidence",
+  });
+  await expect(review.getByText(/Conventional \.lego\.yml/)).toBeVisible();
+  await expect(review.getByText("./cloudflare.env")).toBeVisible();
+  await expect(review.getByText("/srv/lego/cloudflare.env")).toBeVisible();
+  await expect(review.getByText("./public")).toBeVisible();
+  await expect(review.getByText("/srv/lego/public")).toBeVisible();
+  await expect(review.getByText("uid 991 / gid 991").first()).toBeVisible();
 
   const adopt = page.getByRole("button", { name: "Adopt reviewed workspace" });
   await expect(adopt).toBeDisabled();

@@ -20,7 +20,7 @@ const readySnapshot = {
   source,
   projection: [
     {
-      fieldId: "account.eab_hmac",
+      fieldId: "account.eab.hmac_key",
       bindings: [{ id: "account", value: "home" }],
       label: "External account binding secret",
       kind: "secret",
@@ -84,7 +84,7 @@ describe("configuration client", () => {
     expect(JSON.stringify(snapshot)).not.toContain("secret-value");
     if (snapshot.state === "ready") {
       expect(snapshot.projection[0]).toEqual({
-        fieldId: "account.eab_hmac",
+        fieldId: "account.eab.hmac_key",
         bindings: [{ id: "account", value: "home" }],
         label: "External account binding secret",
         kind: "secret",
@@ -110,11 +110,54 @@ describe("configuration client", () => {
     await expect(client.getConfiguration()).resolves.toEqual(unsupported);
   });
 
+  it("decodes a curated-invalid projection as repairable when editing is enabled", async () => {
+    const repairable = {
+      ...readySnapshot,
+      state: "invalid",
+      diagnostics: [
+        {
+          ...diagnostic(),
+          code: "semantic_validation_failed",
+          fieldId: "certificate.domains",
+          bindings: [{ id: "certificate", value: "home" }],
+        },
+      ],
+      capabilities: { editing: true, execution: false },
+    };
+    const client = createConfigurationClient({
+      fetch: vi.fn(async () => jsonResponse(repairable)),
+    });
+
+    await expect(client.getConfiguration()).resolves.toEqual(repairable);
+  });
+
+  it("keeps an invalid projection read-only when editing is disabled", async () => {
+    const readOnly = {
+      ...readySnapshot,
+      state: "invalid",
+      diagnostics: [
+        {
+          ...diagnostic(),
+          code: "schema_validation_failed",
+          fieldId: null,
+          bindings: [],
+        },
+      ],
+      capabilities: { editing: false, execution: false },
+    };
+    const client = createConfigurationClient({
+      fetch: vi.fn(async () => jsonResponse(readOnly)),
+    });
+
+    await expect(client.getConfiguration()).resolves.toEqual(readOnly);
+  });
+
   it("decodes secret-free recovery evidence", async () => {
     const recovery = {
       state: "recovery_required",
       source,
       recovery: {
+        operation: "edit",
         phase: "replacing",
         state: "ambiguous",
         targets: [
@@ -140,18 +183,189 @@ describe("configuration client", () => {
     await expect(client.getConfiguration()).resolves.toEqual(recovery);
   });
 
-  it("submits an explicit adopt-current recovery without replay fields", async () => {
-    const request = vi.fn<typeof fetch>(async () =>
-      jsonResponse(readySnapshot),
+  it("decodes the exact creation-required bootstrap boundary", async () => {
+    const creationRequired = {
+      state: "creation_required",
+      source: {
+        baseRevisionToken,
+        configurationPath: "",
+        dotenvPaths: [],
+        runtimeManifestId: "lego-v5.3.1",
+      },
+      diagnostics: [],
+      capabilities: { editing: false, execution: false },
+    };
+    const client = createConfigurationClient({
+      fetch: vi.fn(async () => jsonResponse(creationRequired)),
+    });
+
+    await expect(client.getConfiguration()).resolves.toEqual(creationRequired);
+  });
+
+  it("sends the runtime-bound creation preview and save contracts", async () => {
+    const changes: ConfigurationChange[] = [
+      {
+        fieldId: "workspace.storage",
+        bindings: [],
+        operation: "set",
+        value: ".lego",
+      },
+    ];
+    const preview = {
+      state: "review_required",
+      baseRevisionToken,
+      reviewedPreviewToken,
+      resultingState: "ready",
+      summary: [
+        {
+          fieldId: "workspace.storage",
+          bindings: [],
+          label: "Native storage directory",
+          file: "configuration",
+          action: "added",
+          sensitive: false,
+          before: { state: "absent" },
+          after: { state: "value", value: ".lego" },
+        },
+      ],
+      diagnostics: [],
+      executionAllowed: true,
+    };
+    const created = {
+      ...readySnapshot,
+      source: { ...source, baseRevisionToken: nextRevisionToken },
+    };
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(preview))
+      .mockResolvedValueOnce(jsonResponse(created));
+    const client = createConfigurationClient({
+      fetch: request,
+      readCookies: () => "__Host-acmemux_csrf=csrf-token",
+    });
+
+    await client.previewCreation(baseRevisionToken, "/srv/lego", null, changes);
+    await client.createConfiguration(
+      "/srv/lego",
+      null,
+      baseRevisionToken,
+      source.runtimeManifestId,
+      changes,
+      reviewedPreviewToken,
     );
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/configuration/creation-previews",
+      expect.objectContaining({
+        body: JSON.stringify({
+          baseRevisionToken,
+          workingDirectory: "/srv/lego",
+          configurationPath: null,
+          changes,
+        }),
+        method: "POST",
+      }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/configuration/creation",
+      expect.objectContaining({
+        body: JSON.stringify({
+          workingDirectory: "/srv/lego",
+          configurationPath: null,
+          baseRevisionToken,
+          changes,
+          reviewedPreviewToken,
+        }),
+        method: "PUT",
+      }),
+    );
+  });
+
+  it.each([
+    {
+      name: "the stale creation base revision",
+      response: readySnapshot,
+    },
+    {
+      name: "a different native target",
+      response: {
+        ...readySnapshot,
+        source: {
+          ...source,
+          baseRevisionToken: nextRevisionToken,
+          configurationPath: "/srv/other/.lego.yml",
+        },
+      },
+    },
+    {
+      name: "a different runtime manifest",
+      response: {
+        ...readySnapshot,
+        source: {
+          ...source,
+          baseRevisionToken: nextRevisionToken,
+          runtimeManifestId: "lego-v5.4.0",
+        },
+      },
+    },
+    {
+      name: "a non-ready creation state",
+      response: {
+        ...readySnapshot,
+        source: { ...source, baseRevisionToken: nextRevisionToken },
+        state: "unsupported",
+        diagnostics: [diagnostic()],
+        capabilities: { editing: true, execution: false },
+      },
+    },
+  ])("rejects creation success reporting $name", async ({ response }) => {
+    const request = vi.fn<typeof fetch>(async () => jsonResponse(response));
     const client = createConfigurationClient({
       fetch: request,
       readCookies: () => "__Host-acmemux_csrf=csrf-token",
     });
 
     await expect(
-      client.resolveRecovery(baseRevisionToken, "adopt_current"),
-    ).resolves.toEqual(readySnapshot);
+      client.createConfiguration(
+        "/srv/lego",
+        null,
+        baseRevisionToken,
+        source.runtimeManifestId,
+        [
+          {
+            fieldId: "workspace.storage",
+            bindings: [],
+            operation: "set",
+            value: ".lego",
+          },
+        ],
+        reviewedPreviewToken,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it("submits an explicit adopt-current recovery without replay fields", async () => {
+    const resolved = {
+      ...readySnapshot,
+      source: { ...source, baseRevisionToken: nextRevisionToken },
+    };
+    const request = vi.fn<typeof fetch>(async () => jsonResponse(resolved));
+    const client = createConfigurationClient({
+      fetch: request,
+      readCookies: () => "__Host-acmemux_csrf=csrf-token",
+    });
+
+    await expect(
+      client.resolveRecovery(
+        baseRevisionToken,
+        "adopt_current",
+        "edit",
+        source.configurationPath,
+        source.runtimeManifestId,
+      ),
+    ).resolves.toEqual(resolved);
     expect(request).toHaveBeenCalledWith(
       "/api/v1/configuration/recovery",
       expect.objectContaining({
@@ -168,6 +382,178 @@ describe("configuration client", () => {
 
   it.each([
     {
+      name: "the stale recovery revision",
+      response: readySnapshot,
+    },
+    {
+      name: "a different native target",
+      response: {
+        ...readySnapshot,
+        source: {
+          ...source,
+          baseRevisionToken: nextRevisionToken,
+          configurationPath: "/srv/other/.lego.yml",
+        },
+      },
+    },
+    {
+      name: "a different runtime manifest",
+      response: {
+        ...readySnapshot,
+        source: {
+          ...source,
+          baseRevisionToken: nextRevisionToken,
+          runtimeManifestId: "lego-v5.4.0",
+        },
+      },
+    },
+    {
+      name: "another recovery-required state",
+      response: {
+        state: "recovery_required",
+        source: { ...source, baseRevisionToken: nextRevisionToken },
+        recovery: {
+          operation: "edit",
+          phase: "replacing",
+          state: "ambiguous",
+          targets: [
+            {
+              role: "configuration",
+              path: source.configurationPath,
+              state: "ambiguous",
+            },
+          ],
+        },
+        diagnostics: [diagnostic("recovery_required")],
+        capabilities: { editing: false, execution: false },
+      },
+    },
+    {
+      name: "an invalid adopted configuration",
+      response: {
+        ...readySnapshot,
+        source: { ...source, baseRevisionToken: nextRevisionToken },
+        state: "invalid",
+        diagnostics: [
+          {
+            ...diagnostic(),
+            code: "semantic_validation_failed",
+          },
+        ],
+        capabilities: { editing: true, execution: false },
+      },
+    },
+    {
+      name: "creation-required after adoption",
+      response: {
+        state: "creation_required",
+        source: {
+          baseRevisionToken: nextRevisionToken,
+          configurationPath: "",
+          dotenvPaths: [],
+          runtimeManifestId: source.runtimeManifestId,
+        },
+        diagnostics: [],
+        capabilities: { editing: false, execution: false },
+      },
+    },
+  ])("rejects recovery success reporting $name", async ({ response }) => {
+    const client = createConfigurationClient({
+      fetch: vi.fn(async () => jsonResponse(response)),
+      readCookies: () => "__Host-acmemux_csrf=csrf-token",
+    });
+
+    await expect(
+      client.resolveRecovery(
+        baseRevisionToken,
+        "adopt_current",
+        "edit",
+        source.configurationPath,
+        source.runtimeManifestId,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it("accepts creation-required only after discarding unapplied creation", async () => {
+    const creationRequired = {
+      state: "creation_required",
+      source: {
+        baseRevisionToken: nextRevisionToken,
+        configurationPath: "",
+        dotenvPaths: [],
+        runtimeManifestId: source.runtimeManifestId,
+      },
+      diagnostics: [],
+      capabilities: { editing: false, execution: false },
+    };
+    const client = createConfigurationClient({
+      fetch: vi.fn(async () => jsonResponse(creationRequired)),
+      readCookies: () => "__Host-acmemux_csrf=csrf-token",
+    });
+
+    await expect(
+      client.resolveRecovery(
+        baseRevisionToken,
+        "discard_unapplied",
+        "creation",
+        source.configurationPath,
+        source.runtimeManifestId,
+      ),
+    ).resolves.toEqual(creationRequired);
+  });
+
+  it("rejects an adopted state after discarding unapplied creation", async () => {
+    const adopted = {
+      ...readySnapshot,
+      source: { ...source, baseRevisionToken: nextRevisionToken },
+    };
+    const client = createConfigurationClient({
+      fetch: vi.fn(async () => jsonResponse(adopted)),
+      readCookies: () => "__Host-acmemux_csrf=csrf-token",
+    });
+
+    await expect(
+      client.resolveRecovery(
+        baseRevisionToken,
+        "discard_unapplied",
+        "creation",
+        source.configurationPath,
+        source.runtimeManifestId,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it("accepts a repairable invalid base after discarding an unapplied edit", async () => {
+    const originalInvalid = {
+      ...readySnapshot,
+      source: { ...source, baseRevisionToken: nextRevisionToken },
+      state: "invalid",
+      diagnostics: [
+        {
+          ...diagnostic(),
+          code: "semantic_validation_failed",
+        },
+      ],
+      capabilities: { editing: true, execution: false },
+    };
+    const client = createConfigurationClient({
+      fetch: vi.fn(async () => jsonResponse(originalInvalid)),
+      readCookies: () => "__Host-acmemux_csrf=csrf-token",
+    });
+
+    await expect(
+      client.resolveRecovery(
+        baseRevisionToken,
+        "discard_unapplied",
+        "edit",
+        source.configurationPath,
+        source.runtimeManifestId,
+      ),
+    ).resolves.toEqual(originalInvalid);
+  });
+
+  it.each([
+    {
       name: "an extra top-level property",
       value: { ...readySnapshot, rawYaml: "secret-value" },
     },
@@ -177,7 +563,7 @@ describe("configuration client", () => {
         ...readySnapshot,
         projection: [
           {
-            fieldId: "account.eab_hmac",
+            fieldId: "account.eab.hmac_key",
             bindings: [{ id: "account", value: "home" }],
             label: "External account binding secret",
             kind: "secret",
@@ -262,7 +648,7 @@ describe("configuration client", () => {
     const secret = "test-only-super-secret";
     const changes: ConfigurationChange[] = [
       {
-        fieldId: "account.eab_hmac",
+        fieldId: "account.eab.hmac_key",
         bindings: [{ id: "account", value: "home" }],
         operation: "set",
         value: secret,
@@ -275,7 +661,7 @@ describe("configuration client", () => {
       resultingState: "ready",
       summary: [
         {
-          fieldId: "account.eab_hmac",
+          fieldId: "account.eab.hmac_key",
           bindings: [{ id: "account", value: "home" }],
           label: "External account binding secret",
           file: "configuration",
@@ -304,6 +690,8 @@ describe("configuration client", () => {
     const reviewed = await client.previewChanges(baseRevisionToken, changes);
     const result = await client.saveChanges(
       baseRevisionToken,
+      source.configurationPath,
+      source.runtimeManifestId,
       changes,
       reviewedPreviewToken,
     );
@@ -337,6 +725,94 @@ describe("configuration client", () => {
     }
   });
 
+  it("rejects an edit save response that remains invalid", async () => {
+    const invalid = {
+      ...readySnapshot,
+      state: "invalid",
+      diagnostics: [
+        {
+          ...diagnostic(),
+          code: "semantic_validation_failed",
+          fieldId: "certificate.domains",
+          bindings: [{ id: "certificate", value: "home" }],
+        },
+      ],
+      capabilities: { editing: true, execution: false },
+    };
+    const client = createConfigurationClient({
+      fetch: vi.fn(async () => jsonResponse(invalid)),
+      readCookies: () => "__Host-acmemux_csrf=csrf-token",
+    });
+
+    await expect(
+      client.saveChanges(
+        baseRevisionToken,
+        source.configurationPath,
+        source.runtimeManifestId,
+        [
+          {
+            fieldId: "certificate.domains",
+            bindings: [{ id: "certificate", value: "home" }],
+            operation: "set",
+            value: ["home.example.com"],
+          },
+        ],
+        reviewedPreviewToken,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it.each([
+    {
+      name: "the stale base revision",
+      response: readySnapshot,
+    },
+    {
+      name: "a different native target",
+      response: {
+        ...readySnapshot,
+        source: {
+          ...source,
+          baseRevisionToken: nextRevisionToken,
+          configurationPath: "/srv/other/.lego.yml",
+        },
+      },
+    },
+    {
+      name: "a different runtime manifest",
+      response: {
+        ...readySnapshot,
+        source: {
+          ...source,
+          baseRevisionToken: nextRevisionToken,
+          runtimeManifestId: "lego-v5.4.0",
+        },
+      },
+    },
+  ])("rejects edit save success reporting $name", async ({ response }) => {
+    const client = createConfigurationClient({
+      fetch: vi.fn(async () => jsonResponse(response)),
+      readCookies: () => "__Host-acmemux_csrf=csrf-token",
+    });
+
+    await expect(
+      client.saveChanges(
+        baseRevisionToken,
+        source.configurationPath,
+        source.runtimeManifestId,
+        [
+          {
+            fieldId: "workspace.storage",
+            bindings: [],
+            operation: "set",
+            value: "./other-data",
+          },
+        ],
+        reviewedPreviewToken,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
   it("rejects a preview summary that represents a secret as a value", async () => {
     const client = createConfigurationClient({
       fetch: vi.fn(async () =>
@@ -347,7 +823,7 @@ describe("configuration client", () => {
           resultingState: "ready",
           summary: [
             {
-              fieldId: "account.eab_hmac",
+              fieldId: "account.eab.hmac_key",
               bindings: [{ id: "account", value: "home" }],
               label: "External account binding secret",
               file: "configuration",
@@ -367,7 +843,7 @@ describe("configuration client", () => {
     await expect(
       client.previewChanges(baseRevisionToken, [
         {
-          fieldId: "account.eab_hmac",
+          fieldId: "account.eab.hmac_key",
           bindings: [{ id: "account", value: "home" }],
           operation: "remove",
         },
@@ -433,7 +909,7 @@ describe("configuration client", () => {
     await expect(
       client.previewChanges(baseRevisionToken, [
         {
-          fieldId: "account.eab_hmac",
+          fieldId: "account.eab.hmac_key",
           bindings: [{ id: "account", value: "home\nlab" }],
           operation: "set",
           value: "replacement-secret",

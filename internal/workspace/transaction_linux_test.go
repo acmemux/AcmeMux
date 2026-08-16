@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"os"
@@ -490,7 +491,107 @@ func TestRecoveryFinalizesWhollyAppliedCandidateAfterCrashBoundary(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertStoredSelectionEqual(t, loaded, selection)
+	if !selection.SelectionPresent {
+		t.Fatal("adopted recovery did not report a selected workspace")
+	}
+	assertStoredSelectionEqual(t, loaded, selection.Selection)
+	assertNoJournalOrStages(t, fixture)
+}
+
+func TestMigration007PreservesLiveV006AppliedRecovery(t *testing.T) {
+	fixture := newTransactionFixture(t)
+	manager := fixture.managerWith(t, WithFailureInjector(func(point FailurePoint, _ int) error {
+		if point == FailureBeforeFinalize {
+			return errors.New("simulated v006 interruption")
+		}
+		return nil
+	}))
+	lease := acquireLease(t, fixture.coordinator, PurposeSave)
+	sources, err := manager.Snapshot(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const changed = "TOKEN=v006-live-recovery\n"
+	_, err = manager.Commit(context.Background(), lease, CommitPlan{
+		Sources: sources, CandidateConfiguration: sources.Configuration.Content,
+		Replacements: []Replacement{{Role: RoleDotenv, Path: fixture.dotenv, Content: []byte(changed)}},
+	}, allowCommit)
+	sources.Close()
+	if !errors.Is(err, ErrRecoveryRequired) {
+		t.Fatalf("Commit() error = %v, want ErrRecoveryRequired", err)
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	legacy, err := sql.Open("sqlite", fixture.database.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"ALTER TABLE workspace_edit_journal DROP COLUMN configuration_source",
+		"ALTER TABLE workspace_edit_journal DROP COLUMN bootstrap",
+		"DELETE FROM schema_migrations WHERE version = '007_workspace_bootstrap.sql'",
+	} {
+		if _, err := legacy.Exec(statement); err != nil {
+			legacy.Close()
+			t.Fatalf("prepare v006 fixture: %v", err)
+		}
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := state.Open(fixture.stateDirectory)
+	if err != nil {
+		t.Fatalf("Open(v006 upgrade) error = %v", err)
+	}
+	t.Cleanup(func() { _ = upgraded.Close() })
+	fixture.database = upgraded
+	fixture.store, err = NewStore(upgraded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.journal, err = NewJournalStore(upgraded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager = fixture.managerWith(t)
+	journal, err := fixture.journal.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.Bootstrap || journal.ConfigurationSource != "" {
+		t.Fatalf("migrated v006 journal = %#v", journal)
+	}
+
+	lease = acquireLease(t, fixture.coordinator, PurposeRecovery)
+	defer lease.Release()
+	recovery, err := manager.InspectRecovery(context.Background(), lease)
+	if err != nil || recovery.State != RecoveryApplied || recovery.Bootstrap {
+		t.Fatalf("InspectRecovery() = %#v, %v", recovery, err)
+	}
+	validatorCalls := 0
+	result, err := manager.ResolveRecovery(
+		context.Background(), lease, ResolutionFinalizeApplied, allowCommit,
+		func(_ context.Context, current *SourceSet) error {
+			validatorCalls++
+			if len(current.Dotenv) != 1 || string(current.Dotenv[0].Content) != changed {
+				return errors.New("migrated recovery content changed")
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("ResolveRecovery() error = %v", err)
+	}
+	if validatorCalls != 1 || !result.SelectionPresent ||
+		result.Selection.Review.ConfigurationSource != ConfigurationConventionalYML {
+		t.Fatalf("migrated recovery result = %#v, validator calls = %d", result, validatorCalls)
+	}
 	assertNoJournalOrStages(t, fixture)
 }
 
@@ -558,7 +659,10 @@ func TestRecoveryAdoptsExternallyRepairedCurrentFilesAfterRawRenameCrash(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertStoredSelectionEqual(t, loaded, selection)
+	if !selection.SelectionPresent {
+		t.Fatal("adopted recovery did not report a selected workspace")
+	}
+	assertStoredSelectionEqual(t, loaded, selection.Selection)
 	assertNoJournalOrStages(t, fixture)
 }
 

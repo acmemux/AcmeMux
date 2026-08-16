@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -22,17 +23,23 @@ import (
 )
 
 const serviceTestConfiguration = `# authoritative native file
+networkStack: ipv4only
 accounts:
-  home: {}
+  home:
+    server: letsencrypt
+    acceptsTermsOfService: true
 challenges:
   web:
-    http: {}
+    http:
+      address: ":8080"
 certificates:
   gateway:
     domains: [gateway.home.example]
     account: home
     challenge: web
 `
+
+const task07EABCanary = "AQIDBAUGBwgJ-secret-safe_url"
 
 type fakeRuntimeSelections struct {
 	selection acmeruntime.Selection
@@ -60,6 +67,7 @@ type fakeTransactions struct {
 	generation        uint64
 	recovery          *workspace.Recovery
 	commits           int
+	selectionMissing  bool
 }
 
 func (fake *fakeTransactions) Snapshot(context.Context, *workspace.Lease) (*workspace.SourceSet, error) {
@@ -67,6 +75,9 @@ func (fake *fakeTransactions) Snapshot(context.Context, *workspace.Lease) (*work
 	defer fake.mu.Unlock()
 	if fake.recovery != nil {
 		return nil, workspace.ErrRecoveryRequired
+	}
+	if fake.selectionMissing {
+		return nil, workspace.ErrNoSelection
 	}
 	return fake.snapshot(), nil
 }
@@ -146,6 +157,43 @@ func (fake *fakeTransactions) Commit(_ context.Context, _ *workspace.Lease, plan
 	return fake.snapshot().Selection, nil
 }
 
+func (fake *fakeTransactions) AuditBootstrap(
+	context.Context,
+	*workspace.Lease,
+	workspace.BootstrapRequest,
+	[]byte,
+	[]workspace.Replacement,
+) (workspace.BootstrapAudit, error) {
+	return workspace.BootstrapAudit{}, nil
+}
+
+func (fake *fakeTransactions) Bootstrap(
+	ctx context.Context,
+	_ *workspace.Lease,
+	plan workspace.BootstrapPlan,
+	guard workspace.CommitGuard,
+) (workspace.Selection, error) {
+	if err := guard(ctx); err != nil {
+		return workspace.Selection{}, err
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if !fake.selectionMissing {
+		return workspace.Selection{}, workspace.ErrSourceChanged
+	}
+	for _, replacement := range plan.Replacements {
+		if replacement.Role == workspace.RoleConfiguration {
+			fake.configuration = slices.Clone(replacement.Content)
+			fake.configurationPath = replacement.Path
+		}
+	}
+	fake.workingDirectory = plan.Request.WorkingDirectory
+	fake.selectionMissing = false
+	fake.generation++
+	fake.commits++
+	return fake.snapshot().Selection, nil
+}
+
 func (fake *fakeTransactions) InspectRecovery(context.Context, *workspace.Lease) (workspace.Recovery, error) {
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
@@ -163,45 +211,52 @@ func (fake *fakeTransactions) ResolveRecovery(
 	resolution workspace.RecoveryResolution,
 	guard workspace.CommitGuard,
 	validator workspace.RecoveryValidator,
-) (workspace.Selection, error) {
+) (workspace.RecoveryResult, error) {
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
 	if fake.recovery == nil {
-		return workspace.Selection{}, workspace.ErrNoEditJournal
+		return workspace.RecoveryResult{}, workspace.ErrNoEditJournal
 	}
 	if err := guard(ctx); err != nil {
-		return workspace.Selection{}, err
+		return workspace.RecoveryResult{}, err
 	}
 	switch resolution {
 	case workspace.ResolutionDiscardUnapplied:
 		if fake.recovery.State != workspace.RecoveryUnapplied {
-			return workspace.Selection{}, workspace.ErrInvalidEdit
+			return workspace.RecoveryResult{}, workspace.ErrInvalidEdit
+		}
+		bootstrap := fake.recovery.Bootstrap
+		fake.recovery = nil
+		if bootstrap {
+			fake.selectionMissing = true
+			return workspace.RecoveryResult{}, nil
 		}
 	case workspace.ResolutionFinalizeApplied:
-		if fake.recovery.State != workspace.RecoveryApplied || validator == nil {
-			return workspace.Selection{}, workspace.ErrInvalidEdit
+		if fake.recovery.Bootstrap || fake.recovery.State != workspace.RecoveryApplied || validator == nil {
+			return workspace.RecoveryResult{}, workspace.ErrInvalidEdit
 		}
 		sources := fake.snapshot()
 		defer sources.Close()
 		if err := validator(ctx, sources); err != nil {
-			return workspace.Selection{}, err
+			return workspace.RecoveryResult{}, err
 		}
 	case workspace.ResolutionAdoptCurrent:
 		if (fake.recovery.State != workspace.RecoveryApplied &&
 			fake.recovery.State != workspace.RecoveryPartial &&
 			fake.recovery.State != workspace.RecoveryAmbiguous) || validator == nil {
-			return workspace.Selection{}, workspace.ErrInvalidEdit
+			return workspace.RecoveryResult{}, workspace.ErrInvalidEdit
 		}
 		sources := fake.snapshot()
 		defer sources.Close()
 		if err := validator(ctx, sources); err != nil {
-			return workspace.Selection{}, err
+			return workspace.RecoveryResult{}, err
 		}
 	default:
-		return workspace.Selection{}, workspace.ErrInvalidEdit
+		return workspace.RecoveryResult{}, workspace.ErrInvalidEdit
 	}
 	fake.recovery = nil
-	return fake.snapshot().Selection, nil
+	fake.selectionMissing = false
+	return workspace.RecoveryResult{Selection: fake.snapshot().Selection, SelectionPresent: true}, nil
 }
 
 func newTestService(t *testing.T, transactions *fakeTransactions, factory EngineFactory, key byte) *Service {
@@ -321,7 +376,9 @@ func TestSnapshotUsesOpaqueSourceTokenAndPreservesUnsupportedNativeContent(t *te
 	if view.Source.BaseRevisionToken == hex.EncodeToString(rawDigest[:]) {
 		t.Fatal("revision token exposed an unkeyed content digest")
 	}
-	if len(view.Inspection.Projection) != 1 || view.Inspection.Projection[0].Label != "Workspace storage" {
+	if !slices.ContainsFunc(view.Inspection.Projection, func(field nativeconfig.ProjectedField) bool {
+		return field.FieldID == integrations.FieldWorkspaceStorage && field.Label == "Workspace storage"
+	}) {
 		t.Fatalf("projection = %#v", view.Inspection.Projection)
 	}
 	if len(view.Diagnostics) == 0 || view.Diagnostics[0].Code != CodeUnsupportedContent {
@@ -366,6 +423,254 @@ func TestPreviewAndSaveRequireExactOpaqueReviewTokens(t *testing.T) {
 	}
 }
 
+func TestRepairableConstraintStateRemainsEditableButCannotSaveUnrepairedCandidate(t *testing.T) {
+	directory := t.TempDir()
+	source := []byte(`storage: ./native
+accounts:
+  home: {}
+challenges:
+  web:
+    http:
+      address: ":8080"
+certificates:
+  gateway:
+    domains: [gateway.home.example]
+`)
+	transactions := &fakeTransactions{
+		workingDirectory: directory, configurationPath: filepath.Join(directory, "lego.yml"),
+		configuration: source, generation: 1,
+	}
+	service := newTestService(t, transactions, nil, 0x23)
+	view, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.State != StateInvalid || !view.Editing || view.Execution {
+		t.Fatalf("repairable constraint view = %#v", view)
+	}
+	unrepaired, err := service.Preview(context.Background(), view.Source.BaseRevisionToken, []nativeconfig.Change{{
+		FieldID: integrations.FieldWorkspaceStorage, Operation: nativeconfig.OperationSet,
+		Value: integrations.StringValue("./other-native"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unrepaired.State != PreviewInvalid || unrepaired.ResultingState != StateInvalid || unrepaired.ReviewedPreviewToken != "" {
+		t.Fatalf("unrepaired candidate = %#v", unrepaired)
+	}
+	repaired, err := service.Preview(context.Background(), view.Source.BaseRevisionToken, []nativeconfig.Change{
+		{
+			FieldID:   integrations.FieldAccountServer,
+			Bindings:  []nativeconfig.Binding{{ID: integrations.BindingAccount, Value: "home"}},
+			Operation: nativeconfig.OperationSet, Value: integrations.StringValue("letsencrypt"),
+		},
+		{
+			FieldID:   integrations.FieldCertificateAccount,
+			Bindings:  []nativeconfig.Binding{{ID: integrations.BindingCertificate, Value: "gateway"}},
+			Operation: nativeconfig.OperationSet, Value: integrations.StringValue("home"),
+		},
+		{
+			FieldID:   integrations.FieldCertificateChallenge,
+			Bindings:  []nativeconfig.Binding{{ID: integrations.BindingCertificate, Value: "gateway"}},
+			Operation: nativeconfig.OperationSet, Value: integrations.StringValue("web"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.State != PreviewReviewRequired || repaired.ResultingState != StateReady || len(repaired.ReviewedPreviewToken) != 43 {
+		t.Fatalf("repaired candidate = %#v", repaired)
+	}
+}
+
+func TestUnrelatedStorageEditPreservesImplicitUnsupportedChallenge(t *testing.T) {
+	for index, challengeName := range []string{"tls-alpn-01", "dns-persist-01"} {
+		t.Run(challengeName, func(t *testing.T) {
+			directory := t.TempDir()
+			source := []byte(`storage: ./native
+accounts:
+  home:
+    server: letsencrypt
+certificates:
+  gateway:
+    domains: [gateway.home.example]
+    account: home
+    challenge: ` + challengeName + "\n")
+			transactions := &fakeTransactions{
+				workingDirectory: directory, configurationPath: filepath.Join(directory, "lego.yml"),
+				configuration: source, generation: 1,
+			}
+			service := newTestService(t, transactions, nil, byte(0x24+index))
+			view, err := service.Snapshot(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if view.State != StateUnsupported || !view.Editing || view.Execution ||
+				!slices.ContainsFunc(view.Diagnostics, func(diagnostic Diagnostic) bool {
+					return diagnostic.Code == CodeUnsupportedChallenge
+				}) {
+				t.Fatalf("implicit built-in view = %#v", view)
+			}
+			changes := []nativeconfig.Change{{
+				FieldID: integrations.FieldWorkspaceStorage, Operation: nativeconfig.OperationSet,
+				Value: integrations.StringValue("./other-native"),
+			}}
+			preview, err := service.Preview(context.Background(), view.Source.BaseRevisionToken, changes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if preview.State != PreviewReviewRequired || preview.ResultingState != StateUnsupported || preview.Execution {
+				t.Fatalf("implicit built-in preview = %#v", preview)
+			}
+			updated, err := service.Save(
+				context.Background(), view.Source.BaseRevisionToken, changes, preview.ReviewedPreviewToken, allowServiceCommit,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if updated.State != StateUnsupported || updated.Execution ||
+				!bytes.Contains(transactions.configuration, []byte("challenge: "+challengeName)) ||
+				bytes.Contains(transactions.configuration, []byte("challenges:")) {
+				t.Fatalf("unrelated edit changed implicit built-in: %s, %#v", transactions.configuration, updated)
+			}
+		})
+	}
+}
+
+func TestUnrelatedStorageEditPreservesExplicitUnsupportedEntities(t *testing.T) {
+	tests := []struct {
+		name, source, retained string
+		prohibited             []string
+	}{
+		{
+			name: "TLS-ALPN challenge",
+			source: `storage: ./native
+accounts:
+  home:
+    server: letsencrypt
+challenges:
+  alpn:
+    tls:
+      address: ":443"
+certificates:
+  gateway:
+    domains: [gateway.home.example]
+    account: home
+`, retained: "tls:\n      address: \":443\"", prohibited: []string{"http:", "\n    challenge:"},
+		},
+		{
+			name: "HTTP memcached challenge",
+			source: `storage: ./native
+accounts:
+  home:
+    server: letsencrypt
+challenges:
+  cache:
+    http:
+      memcachedHosts: [127.0.0.1:11211]
+certificates:
+  gateway:
+    domains: [gateway.home.example]
+    account: home
+    challenge: cache
+`, retained: "memcachedHosts:", prohibited: []string{"address: :80"},
+		},
+		{
+			name: "HTTP S3 challenge",
+			source: `storage: ./native
+accounts:
+  home:
+    server: letsencrypt
+challenges:
+  object:
+    http:
+      s3Bucket: acme-tokens
+certificates:
+  gateway:
+    domains: [gateway.home.example]
+    account: home
+    challenge: object
+`, retained: "s3Bucket: acme-tokens", prohibited: []string{"address: :80"},
+		},
+		{
+			name: "CSR certificate",
+			source: `storage: ./native
+accounts:
+  home:
+    server: letsencrypt
+certificates:
+  imported:
+    csr: request.csr
+    account: home
+    challenge: http-01
+`, retained: "csr: request.csr", prohibited: []string{"domains:", "challenges:"},
+		},
+		{
+			name: "PFX output",
+			source: `storage: ./native
+accounts:
+  home:
+    server: letsencrypt
+challenges:
+  web:
+    http:
+      address: ":8080"
+certificates:
+  gateway:
+    domains: [gateway.home.example]
+    pfx:
+      password: pfx-preserved-canary
+      format: SHA256
+`, retained: "pfx:\n      password: pfx-preserved-canary\n      format: SHA256", prohibited: []string{"\n    account:", "\n    challenge:", "keyType:", "renew:"},
+		},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			transactions := &fakeTransactions{
+				workingDirectory: directory, configurationPath: filepath.Join(directory, "lego.yml"),
+				configuration: []byte(test.source), generation: 1,
+			}
+			service := newTestService(t, transactions, nil, byte(0x2a+index))
+			view, err := service.Snapshot(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if view.State != StateUnsupported || !view.Editing || view.Execution ||
+				!slices.ContainsFunc(view.Diagnostics, func(diagnostic Diagnostic) bool {
+					return diagnostic.Code == CodeUnsupportedChallenge || diagnostic.Code == CodeUnsupportedContent ||
+						diagnostic.Code == CodeUnsupportedOutput
+				}) {
+				t.Fatalf("unsupported entity view = %#v", view)
+			}
+			changes := []nativeconfig.Change{{
+				FieldID: integrations.FieldWorkspaceStorage, Operation: nativeconfig.OperationSet,
+				Value: integrations.StringValue("./other-native"),
+			}}
+			preview, err := service.Preview(context.Background(), view.Source.BaseRevisionToken, changes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if preview.State != PreviewReviewRequired || preview.ResultingState != StateUnsupported || preview.Execution {
+				t.Fatalf("unsupported entity preview = %#v", preview)
+			}
+			updated, err := service.Save(
+				context.Background(), view.Source.BaseRevisionToken, changes, preview.ReviewedPreviewToken, allowServiceCommit,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			materialized := slices.ContainsFunc(test.prohibited, func(value string) bool {
+				return bytes.Contains(transactions.configuration, []byte(value))
+			})
+			if updated.State != StateUnsupported || updated.Execution ||
+				!bytes.Contains(transactions.configuration, []byte(test.retained)) || materialized {
+				t.Fatalf("unrelated edit changed unsupported entity: %s, %#v", transactions.configuration, updated)
+			}
+		})
+	}
+}
+
 func TestSaveRejectsSourceChangeAfterPreview(t *testing.T) {
 	directory := t.TempDir()
 	transactions := &fakeTransactions{
@@ -406,6 +711,230 @@ func TestReviewTokensAreProcessKeyed(t *testing.T) {
 	right, _ := newTestService(t, newTransactions(), nil, 0x55).Snapshot(context.Background())
 	if left.Source.BaseRevisionToken == right.Source.BaseRevisionToken {
 		t.Fatal("independent processes produced the same source review token")
+	}
+}
+
+func TestCreationRequiredPreviewAndCreateUseReviewedBootstrapToken(t *testing.T) {
+	directory := t.TempDir()
+	transactions := &fakeTransactions{workingDirectory: directory, selectionMissing: true, generation: 1}
+	service := newTestService(t, transactions, nil, 0x56)
+	view, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.State != StateCreationRequired || len(view.Source.BaseRevisionToken) != 43 ||
+		view.Source.ConfigurationPath != "" || len(view.Source.DotenvPaths) != 0 || view.Editing || view.Execution {
+		t.Fatalf("creation-required view = %#v", view)
+	}
+	request := CreationRequest{WorkingDirectory: directory, Changes: completeCreationChanges()}
+	preview, err := service.PreviewCreation(context.Background(), view.Source.BaseRevisionToken, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.State != PreviewReviewRequired || preview.ResultingState != StateReady ||
+		len(preview.ReviewedPreviewToken) != 43 || preview.BaseRevisionToken != view.Source.BaseRevisionToken {
+		t.Fatalf("creation preview = %#v", preview)
+	}
+	if _, err := service.Create(context.Background(), view.Source.BaseRevisionToken, request, strings.Repeat("Z", 43), allowServiceCommit); !errors.Is(err, ErrChanged) {
+		t.Fatalf("Create(wrong review token) error = %v", err)
+	}
+	if transactions.commits != 0 || !transactions.selectionMissing {
+		t.Fatal("wrong creation token activated a configuration")
+	}
+	created, err := service.Create(context.Background(), view.Source.BaseRevisionToken, request, preview.ReviewedPreviewToken, allowServiceCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transactions.commits != 1 || transactions.selectionMissing || created.State != StateReady ||
+		transactions.configurationPath != filepath.Join(directory, ".lego.yml") ||
+		!bytes.Contains(transactions.configuration, []byte("server: letsencrypt")) {
+		t.Fatalf("creation result = commits:%d missing:%v path:%q state:%s yaml:%s",
+			transactions.commits, transactions.selectionMissing, transactions.configurationPath, created.State, transactions.configuration)
+	}
+}
+
+func TestCreationPreviewEnforcesRegistrationInputsAndBindsTarget(t *testing.T) {
+	directory := t.TempDir()
+	transactions := &fakeTransactions{workingDirectory: directory, selectionMissing: true, generation: 1}
+	service := newTestService(t, transactions, nil, 0x57)
+	view, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingEmail := slices.DeleteFunc(completeCreationChanges(), func(change nativeconfig.Change) bool {
+		return change.FieldID == integrations.FieldAccountEmail
+	})
+	invalid, err := service.PreviewCreation(context.Background(), view.Source.BaseRevisionToken, CreationRequest{
+		WorkingDirectory: directory, Changes: missingEmail,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalid.State != PreviewInvalid || invalid.ReviewedPreviewToken != "" || invalid.ResultingState != StateInvalid {
+		t.Fatalf("missing-email preview = %#v", invalid)
+	}
+
+	first := CreationRequest{
+		WorkingDirectory: directory, ConfigurationPath: filepath.Join(directory, "first.yml"),
+		Changes: completeCreationChanges(),
+	}
+	reviewed, err := service.PreviewCreation(context.Background(), view.Source.BaseRevisionToken, first)
+	if err != nil || reviewed.State != PreviewReviewRequired {
+		t.Fatalf("first preview = %#v, error = %v", reviewed, err)
+	}
+	changedTarget := first
+	changedTarget.ConfigurationPath = filepath.Join(directory, "second.yml")
+	if _, err := service.Create(context.Background(), view.Source.BaseRevisionToken, changedTarget, reviewed.ReviewedPreviewToken, allowServiceCommit); !errors.Is(err, ErrChanged) {
+		t.Fatalf("Create(changed target) error = %v, want ErrChanged", err)
+	}
+}
+
+func TestGTSCreationKeepsEABHMACPresenceOnlyUntilNativeSave(t *testing.T) {
+	directory := t.TempDir()
+	transactions := &fakeTransactions{workingDirectory: directory, selectionMissing: true, generation: 1}
+	service := newTestService(t, transactions, nil, 0x5a)
+	view, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := completeCreationChanges()
+	for index := range changes {
+		if changes[index].FieldID == integrations.FieldAccountServer {
+			changes[index].Value = integrations.StringValue("googletrust")
+		}
+	}
+	account := []nativeconfig.Binding{{ID: integrations.BindingAccount, Value: "home"}}
+	changes = append(changes,
+		nativeconfig.Change{FieldID: integrations.FieldAccountEABKID, Bindings: account, Operation: nativeconfig.OperationSet, Value: integrations.StringValue("public-kid")},
+		nativeconfig.Change{FieldID: integrations.FieldAccountEABHMACKey, Bindings: account, Operation: nativeconfig.OperationSet, Value: integrations.StringValue(task07EABCanary)},
+	)
+	request := CreationRequest{WorkingDirectory: directory, Changes: changes}
+	preview, err := service.PreviewCreation(context.Background(), view.Source.BaseRevisionToken, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.State != PreviewReviewRequired || preview.ResultingState != StateReady {
+		t.Fatalf("GTS creation preview = %#v", preview)
+	}
+	var hmacSummary *nativeconfig.ChangeSummary
+	for index := range preview.Summary {
+		if preview.Summary[index].FieldID == integrations.FieldAccountEABHMACKey {
+			hmacSummary = &preview.Summary[index]
+			break
+		}
+	}
+	if hmacSummary == nil || !hmacSummary.Secret || hmacSummary.Action != nativeconfig.SummarySet {
+		t.Fatalf("HMAC summary = %#v", hmacSummary)
+	}
+	if _, present := hmacSummary.Before(); present {
+		t.Fatal("HMAC summary exposed a before value")
+	}
+	if _, present := hmacSummary.After(); present {
+		t.Fatal("HMAC summary exposed an after value")
+	}
+	if strings.Contains(preview.BaseRevisionToken, task07EABCanary) ||
+		strings.Contains(preview.ReviewedPreviewToken, task07EABCanary) ||
+		strings.Contains(fmt.Sprintf("%#v", preview.Diagnostics), task07EABCanary) {
+		t.Fatal("GTS preview metadata exposed EAB HMAC")
+	}
+	if _, err := service.Create(context.Background(), view.Source.BaseRevisionToken, request, preview.ReviewedPreviewToken, allowServiceCommit); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(transactions.configuration, []byte("hmacKey: "+task07EABCanary)) {
+		t.Fatalf("saved GTS YAML does not contain exact HMAC: %s", transactions.configuration)
+	}
+}
+
+func TestBootstrapRecoveryAdoptionUsesCreationPrerequisites(t *testing.T) {
+	for _, recoveryState := range []workspace.RecoveryState{workspace.RecoveryApplied, workspace.RecoveryAmbiguous} {
+		t.Run(string(recoveryState), func(t *testing.T) {
+			directory := t.TempDir()
+			configurationPath := filepath.Join(directory, ".lego.yml")
+			transactions := &fakeTransactions{
+				workingDirectory: directory, configurationPath: configurationPath,
+				configuration: []byte(serviceTestConfiguration), generation: 1, selectionMissing: true,
+				recovery: &workspace.Recovery{
+					TransactionID: strings.Repeat("d", 32), WorkingDirectory: directory,
+					ConfigurationPath: configurationPath, Bootstrap: true,
+					Phase: workspace.JournalFinalizing, State: recoveryState,
+					Files: []workspace.RecoveryFile{{
+						Ordinal: 0, Role: workspace.RoleConfiguration, Path: configurationPath,
+						State: workspace.RecoveryFileApplied,
+					}},
+				},
+			}
+			service := newTestService(t, transactions, nil, 0x58)
+			recovery, err := service.Snapshot(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !recovery.Recovery.Bootstrap {
+				t.Fatalf("recovery view = %#v", recovery)
+			}
+			if _, err := service.ResolveRecovery(context.Background(), recovery.Source.BaseRevisionToken, workspace.ResolutionAdoptCurrent, allowServiceCommit); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("ResolveRecovery(invalid bootstrap) error = %v, want ErrInvalid", err)
+			}
+			if transactions.recovery == nil || !transactions.selectionMissing {
+				t.Fatal("invalid bootstrap recovery was adopted")
+			}
+		})
+	}
+}
+
+func TestDiscardedBootstrapRecoveryReturnsToCreationRequired(t *testing.T) {
+	directory := t.TempDir()
+	configurationPath := filepath.Join(directory, ".lego.yml")
+	transactions := &fakeTransactions{
+		workingDirectory: directory, configurationPath: configurationPath,
+		configuration: []byte(serviceTestConfiguration), generation: 1, selectionMissing: true,
+		recovery: &workspace.Recovery{
+			TransactionID: strings.Repeat("e", 32), WorkingDirectory: directory,
+			ConfigurationPath: configurationPath, Bootstrap: true,
+			Phase: workspace.JournalPrepared, State: workspace.RecoveryUnapplied,
+			Files: []workspace.RecoveryFile{{
+				Ordinal: 0, Role: workspace.RoleConfiguration, Path: configurationPath,
+				State: workspace.RecoveryFileUnapplied,
+			}},
+		},
+	}
+	service := newTestService(t, transactions, nil, 0x59)
+	recovery, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := service.ResolveRecovery(context.Background(), recovery.Source.BaseRevisionToken, workspace.ResolutionDiscardUnapplied, allowServiceCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.State != StateCreationRequired || transactions.recovery != nil || !transactions.selectionMissing {
+		t.Fatalf("discarded creation recovery = %#v, recovery %#v", view, transactions.recovery)
+	}
+}
+
+func completeCreationChanges() []nativeconfig.Change {
+	account := []nativeconfig.Binding{{ID: integrations.BindingAccount, Value: "home"}}
+	challenge := []nativeconfig.Binding{{ID: integrations.BindingChallenge, Value: "web"}}
+	certificate := []nativeconfig.Binding{{ID: integrations.BindingCertificate, Value: "gateway"}}
+	set := func(field integrations.FieldID, bindings []nativeconfig.Binding, value integrations.Value) nativeconfig.Change {
+		return nativeconfig.Change{FieldID: field, Bindings: bindings, Operation: nativeconfig.OperationSet, Value: value}
+	}
+	return []nativeconfig.Change{
+		set(integrations.FieldWorkspaceStorage, nil, integrations.StringValue("./native-storage")),
+		set(integrations.FieldAccountServer, account, integrations.StringValue("letsencrypt")),
+		set(integrations.FieldAccountEmail, account, integrations.StringValue("admin@example.com")),
+		set(integrations.FieldAccountKeyType, account, integrations.StringValue("EC256")),
+		set(integrations.FieldAccountAcceptsTerms, account, integrations.BooleanValue(true)),
+		set(integrations.FieldChallengeHTTPAddress, challenge, integrations.StringValue(":8080")),
+		set(integrations.FieldChallengeHTTPDelay, challenge, integrations.StringValue("0s")),
+		set(integrations.FieldCertificateDomains, certificate, integrations.StringListValue([]string{"gateway.home.example"})),
+		set(integrations.FieldCertificateKeyType, certificate, integrations.StringValue("EC256")),
+		set(integrations.FieldCertificateAccount, certificate, integrations.StringValue("home")),
+		set(integrations.FieldCertificateChallenge, certificate, integrations.StringValue("web")),
+		set(integrations.FieldCertificateRenewDays, certificate, integrations.IntegerValue(0)),
+		set(integrations.FieldCertificateRenewReuseKey, certificate, integrations.BooleanValue(false)),
+		set(integrations.FieldCertificateRenewRandomSleep, certificate, integrations.BooleanValue(false)),
+		set(integrations.FieldCertificateRenewARIDisable, certificate, integrations.BooleanValue(false)),
+		set(integrations.FieldCertificateRenewARIWait, certificate, integrations.StringValue("0s")),
 	}
 }
 

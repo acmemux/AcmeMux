@@ -123,6 +123,14 @@ func (inertConfigurationService) Save(context.Context, string, []nativeconfig.Ch
 	return configuration.View{}, errors.New("unexpected configuration save")
 }
 
+func (inertConfigurationService) PreviewCreation(context.Context, string, configuration.CreationRequest) (configuration.Preview, error) {
+	return configuration.Preview{}, errors.New("unexpected configuration creation preview")
+}
+
+func (inertConfigurationService) Create(context.Context, string, configuration.CreationRequest, string, workspace.CommitGuard) (configuration.View, error) {
+	return configuration.View{}, errors.New("unexpected configuration creation")
+}
+
 func (inertConfigurationService) ResolveRecovery(context.Context, string, workspace.RecoveryResolution, workspace.CommitGuard) (configuration.View, error) {
 	return configuration.View{}, errors.New("unexpected configuration recovery")
 }

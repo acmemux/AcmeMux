@@ -14,7 +14,11 @@ const bindingIdPattern = /^[a-z][a-z0-9_]{0,63}$/;
 const manifestIdPattern = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 
 export type ConfigurationState =
-  "ready" | "unsupported" | "invalid" | "recovery_required";
+  | "creation_required"
+  | "ready"
+  | "unsupported"
+  | "invalid"
+  | "recovery_required";
 
 export type ConfigurationSource = {
   baseRevisionToken: string;
@@ -146,6 +150,7 @@ export type ConfigurationDiagnostic = {
 };
 
 export type RecoveryEvidence = {
+  operation: "creation" | "edit";
   phase: "staging" | "prepared" | "replacing" | "finalizing";
   state: "unapplied" | "partial" | "applied" | "ambiguous";
   targets: Array<{
@@ -168,6 +173,17 @@ type CurrentConfigurationSnapshot = {
 
 export type ConfigurationSnapshot =
   | CurrentConfigurationSnapshot
+  | {
+      state: "creation_required";
+      source: {
+        baseRevisionToken: string;
+        configurationPath: "";
+        dotenvPaths: [];
+        runtimeManifestId: string;
+      };
+      diagnostics: [];
+      capabilities: { editing: false; execution: false };
+    }
   | {
       state: "recovery_required";
       source: ConfigurationSource;
@@ -257,12 +273,31 @@ export interface ConfigurationClient {
   ): Promise<ConfigurationPreview>;
   saveChanges(
     baseRevisionToken: string,
+    expectedConfigurationPath: string,
+    expectedRuntimeManifestId: string,
+    changes: ConfigurationChange[],
+    reviewedPreviewToken: string,
+  ): Promise<ConfigurationSnapshot>;
+  previewCreation(
+    baseRevisionToken: string,
+    workingDirectory: string,
+    configurationPath: string | null,
+    changes: ConfigurationChange[],
+  ): Promise<ConfigurationPreview>;
+  createConfiguration(
+    workingDirectory: string,
+    configurationPath: string | null,
+    baseRevisionToken: string,
+    expectedRuntimeManifestId: string,
     changes: ConfigurationChange[],
     reviewedPreviewToken: string,
   ): Promise<ConfigurationSnapshot>;
   resolveRecovery(
     baseRevisionToken: string,
     resolution: RecoveryResolution,
+    expectedOperation: RecoveryEvidence["operation"],
+    expectedConfigurationPath: string,
+    expectedRuntimeManifestId: string,
   ): Promise<ConfigurationSnapshot>;
 }
 
@@ -486,6 +521,34 @@ function decodeSource(value: unknown): ConfigurationSource {
   };
 }
 
+function decodeCreationSource(
+  value: unknown,
+): Extract<ConfigurationSnapshot, { state: "creation_required" }>["source"] {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "baseRevisionToken",
+      "configurationPath",
+      "dotenvPaths",
+      "runtimeManifestId",
+    ]) ||
+    !validToken(value.baseRevisionToken) ||
+    value.configurationPath !== "" ||
+    !Array.isArray(value.dotenvPaths) ||
+    value.dotenvPaths.length !== 0 ||
+    typeof value.runtimeManifestId !== "string" ||
+    !manifestIdPattern.test(value.runtimeManifestId)
+  ) {
+    invalidResponse();
+  }
+  return {
+    baseRevisionToken: value.baseRevisionToken,
+    configurationPath: "",
+    dotenvPaths: [],
+    runtimeManifestId: value.runtimeManifestId,
+  };
+}
+
 function decodeCapabilities(value: unknown): ConfigurationCapabilities {
   if (
     !isRecord(value) ||
@@ -689,7 +752,8 @@ function decodeDiagnostics(value: unknown): ConfigurationDiagnostic[] {
 function decodeRecovery(value: unknown): RecoveryEvidence {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["phase", "state", "targets"]) ||
+    !hasExactKeys(value, ["operation", "phase", "state", "targets"]) ||
+    (value.operation !== "creation" && value.operation !== "edit") ||
     (value.phase !== "staging" &&
       value.phase !== "prepared" &&
       value.phase !== "replacing" &&
@@ -745,12 +809,41 @@ function decodeRecovery(value: unknown): RecoveryEvidence {
   ) {
     invalidResponse();
   }
-  return { phase: value.phase, state: value.state, targets };
+  return {
+    operation: value.operation,
+    phase: value.phase,
+    state: value.state,
+    targets,
+  };
 }
 
 function decodeSnapshot(value: unknown): ConfigurationSnapshot {
   if (!isRecord(value) || typeof value.state !== "string") {
     invalidResponse();
+  }
+  if (value.state === "creation_required") {
+    if (
+      !hasExactKeys(value, [
+        "state",
+        "source",
+        "diagnostics",
+        "capabilities",
+      ]) ||
+      !Array.isArray(value.diagnostics) ||
+      value.diagnostics.length !== 0
+    ) {
+      invalidResponse();
+    }
+    const capabilities = decodeCapabilities(value.capabilities);
+    if (capabilities.editing || capabilities.execution) {
+      invalidResponse();
+    }
+    return {
+      state: "creation_required",
+      source: decodeCreationSource(value.source),
+      diagnostics: [],
+      capabilities: { editing: false, execution: false },
+    };
   }
   if (value.state === "recovery_required") {
     if (
@@ -812,8 +905,7 @@ function decodeSnapshot(value: unknown): ConfigurationSnapshot {
     (value.state === "ready" &&
       (!capabilities.editing || !capabilities.execution || blocking)) ||
     (value.state === "unsupported" && (capabilities.execution || !blocking)) ||
-    (value.state === "invalid" &&
-      (capabilities.editing || capabilities.execution || !blocking))
+    (value.state === "invalid" && (capabilities.execution || !blocking))
   ) {
     invalidResponse();
   }
@@ -1243,12 +1335,23 @@ export function createConfigurationClient(
       }
       return preview;
     },
-    async saveChanges(baseRevisionToken, changes, reviewedPreviewToken) {
-      if (!validToken(baseRevisionToken) || !validToken(reviewedPreviewToken)) {
+    async saveChanges(
+      baseRevisionToken,
+      expectedConfigurationPath,
+      expectedRuntimeManifestId,
+      changes,
+      reviewedPreviewToken,
+    ) {
+      if (
+        !validToken(baseRevisionToken) ||
+        !validCanonicalAbsolutePath(expectedConfigurationPath) ||
+        !manifestIdPattern.test(expectedRuntimeManifestId) ||
+        !validToken(reviewedPreviewToken)
+      ) {
         throw new ConfigurationRequestError("invalid_request", 0);
       }
       validateChanges(changes);
-      return decodeSnapshot(
+      const snapshot = decodeSnapshot(
         await send(
           "/api/v1/configuration",
           {
@@ -1262,17 +1365,128 @@ export function createConfigurationClient(
           true,
         ),
       );
+      if (
+        (snapshot.state !== "ready" && snapshot.state !== "unsupported") ||
+        snapshot.source.baseRevisionToken === baseRevisionToken ||
+        snapshot.source.configurationPath !== expectedConfigurationPath ||
+        snapshot.source.runtimeManifestId !== expectedRuntimeManifestId
+      ) {
+        invalidResponse();
+      }
+      return snapshot;
     },
-    async resolveRecovery(baseRevisionToken, resolution) {
+    async previewCreation(
+      baseRevisionToken,
+      workingDirectory,
+      configurationPath,
+      changes,
+    ) {
       if (
         !validToken(baseRevisionToken) ||
-        (resolution !== "discard_unapplied" &&
-          resolution !== "finalize_applied" &&
-          resolution !== "adopt_current")
+        !validCanonicalAbsolutePath(workingDirectory) ||
+        (configurationPath !== null &&
+          !validCanonicalAbsolutePath(configurationPath))
       ) {
         throw new ConfigurationRequestError("invalid_request", 0);
       }
-      return decodeSnapshot(
+      validateChanges(changes);
+      const body: {
+        baseRevisionToken: string;
+        workingDirectory: string;
+        configurationPath: string | null;
+        changes: ConfigurationChange[];
+      } = {
+        baseRevisionToken,
+        workingDirectory,
+        configurationPath,
+        changes,
+      };
+      const preview = decodePreview(
+        await send(
+          "/api/v1/configuration/creation-previews",
+          { body: JSON.stringify(body), method: "POST" },
+          true,
+        ),
+      );
+      if (preview.baseRevisionToken !== baseRevisionToken) {
+        invalidResponse();
+      }
+      return preview;
+    },
+    async createConfiguration(
+      workingDirectory,
+      configurationPath,
+      baseRevisionToken,
+      expectedRuntimeManifestId,
+      changes,
+      reviewedPreviewToken,
+    ) {
+      if (
+        !validCanonicalAbsolutePath(workingDirectory) ||
+        (configurationPath !== null &&
+          !validCanonicalAbsolutePath(configurationPath)) ||
+        !validToken(baseRevisionToken) ||
+        !manifestIdPattern.test(expectedRuntimeManifestId) ||
+        !validToken(reviewedPreviewToken)
+      ) {
+        throw new ConfigurationRequestError("invalid_request", 0);
+      }
+      validateChanges(changes);
+      const body: {
+        workingDirectory: string;
+        configurationPath: string | null;
+        baseRevisionToken: string;
+        changes: ConfigurationChange[];
+        reviewedPreviewToken: string;
+      } = {
+        workingDirectory,
+        configurationPath,
+        baseRevisionToken,
+        changes,
+        reviewedPreviewToken,
+      };
+      const snapshot = decodeSnapshot(
+        await send(
+          "/api/v1/configuration/creation",
+          { body: JSON.stringify(body), method: "PUT" },
+          true,
+        ),
+      );
+      const expectedConfigurationPath =
+        configurationPath ??
+        (workingDirectory === "/"
+          ? "/.lego.yml"
+          : `${workingDirectory}/.lego.yml`);
+      if (
+        snapshot.state !== "ready" ||
+        snapshot.source.baseRevisionToken === baseRevisionToken ||
+        snapshot.source.configurationPath !== expectedConfigurationPath ||
+        snapshot.source.runtimeManifestId !== expectedRuntimeManifestId
+      ) {
+        invalidResponse();
+      }
+      return snapshot;
+    },
+    async resolveRecovery(
+      baseRevisionToken,
+      resolution,
+      expectedOperation,
+      expectedConfigurationPath,
+      expectedRuntimeManifestId,
+    ) {
+      if (
+        !validToken(baseRevisionToken) ||
+        (expectedOperation !== "creation" && expectedOperation !== "edit") ||
+        !validCanonicalAbsolutePath(expectedConfigurationPath) ||
+        !manifestIdPattern.test(expectedRuntimeManifestId) ||
+        (resolution !== "discard_unapplied" &&
+          resolution !== "finalize_applied" &&
+          resolution !== "adopt_current") ||
+        (expectedOperation === "creation" && resolution === "finalize_applied")
+      ) {
+        throw new ConfigurationRequestError("invalid_request", 0);
+      }
+      const snapshot = decodeSnapshot(
         await send(
           "/api/v1/configuration/recovery",
           {
@@ -1282,6 +1496,25 @@ export function createConfigurationClient(
           true,
         ),
       );
+      const creationDiscard =
+        expectedOperation === "creation" && resolution === "discard_unapplied";
+      const editDiscard =
+        expectedOperation === "edit" && resolution === "discard_unapplied";
+      const stateMatchesResolution = creationDiscard
+        ? snapshot.state === "creation_required"
+        : snapshot.state === "ready" ||
+          snapshot.state === "unsupported" ||
+          (editDiscard && snapshot.state === "invalid");
+      if (
+        !stateMatchesResolution ||
+        snapshot.source.baseRevisionToken === baseRevisionToken ||
+        (snapshot.state !== "creation_required" &&
+          snapshot.source.configurationPath !== expectedConfigurationPath) ||
+        snapshot.source.runtimeManifestId !== expectedRuntimeManifestId
+      ) {
+        invalidResponse();
+      }
+      return snapshot;
     },
   };
 }
