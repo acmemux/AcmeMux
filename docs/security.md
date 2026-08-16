@@ -238,6 +238,59 @@ operation. A substituted or foreign staging entry is preserved and keeps
 recovery blocked. See `native-configuration.md` for the exact recovery states,
 operator procedure, resource limits, and filesystem assumptions.
 
+## Manual operation trust
+
+Only an authenticated same-origin administrator can request a manual
+whole-workspace preview. The preview is non-writing and contains only the
+reviewed runtime identity and manifest, canonical native paths, configured
+certificate names and public intent, possible native effects, and a fixed
+operation policy. It never contains credentials, raw YAML, an argument vector,
+or native artifact bytes. A memory-keyed HMAC binds it to complete runtime,
+workspace, source, certificate, and policy evidence. Enqueue reconstructs that
+evidence, compares the token in constant time, and revalidates the original
+session and CSRF pair immediately before committing work to SQLite.
+
+The durable worker, not the request context, owns accepted process lifetime.
+Browser disconnect, logout, or session expiry after the commit cannot signal
+the child. There is no browser cancellation mutation and no automatic retry.
+A queued request survives service restart; a request found running after
+restart is marked interrupted, treated as potentially changed, reconciled
+against native inventory, and not replayed.
+
+The broker consumes a freshly revalidated retained executable descriptor and
+starts the exact file directly with arguments `--config` and the canonical
+absolute native configuration path. The adopted working directory preserves
+native relative-path meaning. No shell, inherited standard input, arbitrary
+flag, environment name, hook, or command enters the boundary. The current
+HTTP-01 operation has `LANG=C`, `LC_ALL=C`, `TZ=UTC`, and one randomized
+broker-owned lineage-marker variable; later supported integrations can add
+only exact variables selected by trusted manifest code.
+
+The process starts in its own group with a parent-death signal. AcmeMux acts as
+a child subreaper; process-group signals and identity-bound `/proc` descendant
+tracking use the internal lineage marker to cover children that change group
+or session without adopting unrelated children. The current 30-minute limit
+triggers `SIGTERM`, a five-second grace, and then `SIGKILL`; uncertain tree
+cleanup is an ambiguous result. Service shutdown uses the same controlled
+worker cancellation path.
+
+Captured stdout is limited to 192 KiB, stderr to 64 KiB, and the combined
+result to 256 KiB. Overflow stops the tree and discards the captured transcript
+rather than persisting a partial redaction context. Observed YAML and dotenv
+secret values plus sensitive integration values are redacted before durable
+state. Invalid text and terminal controls are sanitized, followed by a second
+value-redaction pass. Jobs persistence accepts only bounded safe text and
+stable codes, never raw child bytes or input-derived operating-system errors.
+
+A preflight inventory provides a native baseline. Terminal inventory refresh
+and final runtime, workspace, and source revalidation occur while the shared
+lease is still held after every started result. Timeout, interruption, output
+overflow, descendant uncertainty, evidence change, or unavailable inventory
+can therefore report that external state may have changed. The safe action is
+to review native storage, refreshed inventory when available, certificate-level
+evidence, and the redacted transcript before preparing a new preview. See
+`manual-operations.md` for result states and operator actions.
+
 ## Failed sign-in and administrator recovery
 
 Wrong passwords and an uninitialized service use the same credential failure

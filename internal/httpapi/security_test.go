@@ -92,6 +92,7 @@ func TestTrustedForwardedHostAndProtoNeverAffectSecurityDecisions(t *testing.T) 
 		testRuntimeDependencies(),
 		testWorkspaceDependencies(),
 		testConfigurationDependencies(),
+		testOperationDependencies(),
 		fstest.MapFS{"index.html": {Data: []byte("browser")}},
 		SecurityConfig{
 			PublicOrigin:   testPublicOrigin,

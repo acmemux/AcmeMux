@@ -167,6 +167,7 @@ func newWorkspaceHTTPHarness(t *testing.T) *workspaceHTTPHarness {
 		testRuntimeDependencies(),
 		dependencies,
 		testConfigurationDependencies(),
+		testOperationDependencies(),
 		fstest.MapFS{"index.html": {Data: []byte("browser")}},
 		SecurityConfig{PublicOrigin: identityTestOrigin},
 	)
@@ -661,7 +662,7 @@ func TestNewRejectsIncompleteWorkspaceDependencies(t *testing.T) {
 		{Inspector: valid.Inspector, Selections: valid.Selections, Inventory: valid.Inventory, PrepareRuntime: valid.PrepareRuntime, AcquireWorkspace: valid.AcquireWorkspace},
 	}
 	for _, dependencies := range tests {
-		if _, err := New(readinessStub{}, sharedTestIdentity(t), testRuntimeDependencies(), dependencies, testConfigurationDependencies(), fstest.MapFS{}, SecurityConfig{PublicOrigin: testPublicOrigin}); err == nil {
+		if _, err := New(readinessStub{}, sharedTestIdentity(t), testRuntimeDependencies(), dependencies, testConfigurationDependencies(), testOperationDependencies(), fstest.MapFS{}, SecurityConfig{PublicOrigin: testPublicOrigin}); err == nil {
 			t.Fatal("New() accepted incomplete workspace dependencies")
 		}
 	}

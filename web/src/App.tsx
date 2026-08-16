@@ -7,6 +7,7 @@ import {
   browserConfigurationClient,
   type ConfigurationClient,
 } from "./api/configuration";
+import { browserOperationClient, type OperationClient } from "./api/operations";
 import { AuthBoundary } from "./auth/AuthBoundary";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteLoading } from "./components/RouteLoading";
@@ -19,11 +20,13 @@ export function App({
   runtimeClient = browserRuntimeClient,
   workspaceClient = browserWorkspaceClient,
   configurationClient = browserConfigurationClient,
+  operationClient = browserOperationClient,
 }: {
   sessionClient?: SessionClient;
   runtimeClient?: RuntimeClient;
   workspaceClient?: WorkspaceClient;
   configurationClient?: ConfigurationClient;
+  operationClient?: OperationClient;
 } = {}) {
   const showCatalog =
     import.meta.env.DEV &&
@@ -46,6 +49,7 @@ export function App({
       <AuthBoundary client={sessionClient}>
         <OverviewPage
           configurationClient={configurationClient}
+          operationClient={operationClient}
           runtimeClient={runtimeClient}
           workspaceClient={workspaceClient}
         />

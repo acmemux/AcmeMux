@@ -184,7 +184,8 @@ func (inspector *Inspector) Verify(ctx context.Context, reviewed Review) (Review
 		return Review{}, err
 	}
 	if reviewed.ReviewedEvidenceSHA256 == ReviewFingerprint(reviewed) &&
-		current.ReviewedEvidenceSHA256 == reviewed.ReviewedEvidenceSHA256 {
+		current.ReviewedEvidenceSHA256 == ReviewFingerprint(current) &&
+		(current.ReviewedEvidenceSHA256 == reviewed.ReviewedEvidenceSHA256 || sameReviewEvidence(reviewed, current)) {
 		return current, nil
 	}
 	return current, &VerificationError{Reviewed: reviewed, Current: current, Changes: reviewChanges(reviewed, current)}
@@ -259,18 +260,20 @@ func samePathEvidence(left, right PathEvidence) bool {
 	// private staging files in reviewed directories, so these volatile fields
 	// are live display evidence rather than stable review identity.
 	if left.Type == PathTypeDirectory {
+		left.NLink = 0
 		left.Size = 0
 		left.ModifiedAt = time.Time{}
 		left.ChangedAt = time.Time{}
 	}
 	if right.Type == PathTypeDirectory {
+		right.NLink = 0
 		right.Size = 0
 		right.ModifiedAt = time.Time{}
 		right.ChangedAt = time.Time{}
 	}
-	// Directory link counts change when an unrelated sibling directory is
-	// created or removed. They are audited live but are not stable identity
-	// evidence. Final selected-object NLink remains compared and fingerprinted.
+	// Directory link counts change when native child directories are created or
+	// removed. They are audited live but are not stable selected-directory or
+	// ancestor identity evidence.
 	left.Components = append([]ComponentEvidence(nil), left.Components...)
 	right.Components = append([]ComponentEvidence(nil), right.Components...)
 	for index := range left.Components {
@@ -280,6 +283,19 @@ func samePathEvidence(left, right PathEvidence) bool {
 		right.Components[index].NLink = 0
 	}
 	return reflect.DeepEqual(left, right)
+}
+
+func sameReviewEvidence(left, right Review) bool {
+	if left.ConfigurationSource != right.ConfigurationSource || left.Adoptable != right.Adoptable ||
+		!reflect.DeepEqual(left.Diagnostics, right.Diagnostics) ||
+		!samePathEvidence(left.WorkingDirectory, right.WorkingDirectory) ||
+		!samePathEvidence(left.Configuration, right.Configuration) ||
+		!samePathEvidence(left.Storage, right.Storage) ||
+		!samePathEvidenceSlice(left.DotenvFiles, right.DotenvFiles) ||
+		!samePathEvidenceSlice(left.Webroots, right.Webroots) {
+		return false
+	}
+	return true
 }
 
 func allSafe(paths []PathEvidence) bool {

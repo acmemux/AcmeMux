@@ -7,10 +7,12 @@ import {
   supportedCandidate,
 } from "./support/runtime";
 import { mockWorkspace } from "./support/workspace";
+import { mockOperations } from "./support/operations";
 
 test.beforeEach(async ({ page }) => {
   await mockSession(page);
   await mockWorkspace(page);
+  await mockOperations(page);
 });
 
 test("reviews exact executable evidence before adoption", async ({ page }) => {

@@ -213,6 +213,7 @@ func newConfigurationHTTPHarness(t *testing.T) *configurationHTTPHarness {
 		testRuntimeDependencies(),
 		testWorkspaceDependencies(),
 		ConfigurationDependencies{Service: service},
+		testOperationDependencies(),
 		fstest.MapFS{"index.html": {Data: []byte("browser")}},
 		SecurityConfig{PublicOrigin: identityTestOrigin},
 	)

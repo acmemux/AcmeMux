@@ -19,6 +19,10 @@ import {
   type ConfigurationClient,
 } from "../api/configuration";
 import {
+  browserOperationClient,
+  type OperationClient,
+} from "../api/operations";
+import {
   ConfigurationPanel,
   configurationSignal,
   useConfigurationController,
@@ -33,6 +37,11 @@ import {
   useWorkspaceController,
   workspaceSignal,
 } from "./WorkspacePanel";
+import {
+  OperationsPanel,
+  operationSignal,
+  useOperationController,
+} from "./OperationsPanel";
 
 function decodedEvidenceMatches(left: unknown, right: unknown): boolean {
   // Both values have already crossed strict decoders that construct fields in
@@ -84,14 +93,17 @@ function workspaceCandidateInvalidatesCurrent(
 
 export function OverviewPage({
   configurationClient = browserConfigurationClient,
+  operationClient = browserOperationClient,
   runtimeClient = browserRuntimeClient,
   workspaceClient = browserWorkspaceClient,
 }: {
   configurationClient?: ConfigurationClient;
+  operationClient?: OperationClient;
   runtimeClient?: RuntimeClient;
   workspaceClient?: WorkspaceClient;
 } = {}) {
   const creationWasRequired = useRef(false);
+  const refreshedOperationRevision = useRef(0);
   const runtime = useRuntimeController(runtimeClient);
   const runtimeCandidateInvalidates = runtimeCandidateInvalidatesCurrent(
     runtime.snapshot,
@@ -151,17 +163,48 @@ export function OverviewPage({
     configuration.phase === "idle" &&
     configuration.snapshot?.state === "recovery_required";
   const configurationMutationPending = configuration.mutationPhase !== "idle";
-  const configurationInteractionsEnabled =
+  const baseConfigurationInteractionsEnabled =
     runtimeInteractionsEnabled &&
     workspace.phase === "idle" &&
     configuration.phase === "idle" &&
     !configurationMutationPending;
-  const nativeMutationsEnabled =
-    configurationInteractionsEnabled && !configurationRecoveryPending;
   const configurationExecutionReady =
     configuration.phase === "idle" &&
     configuration.error === null &&
     configuration.snapshot?.capabilities.execution === true;
+  const operationStartEligible =
+    runtimeReady &&
+    workspaceReady &&
+    baseConfigurationInteractionsEnabled &&
+    !configurationRecoveryPending &&
+    configurationExecutionReady;
+  const operations = useOperationController(
+    operationClient,
+    operationStartEligible,
+  );
+  const configurationInteractionsEnabled =
+    baseConfigurationInteractionsEnabled &&
+    !operations.blocksWorkspaceMutations;
+  const nativeMutationsEnabled =
+    configurationInteractionsEnabled && !configurationRecoveryPending;
+
+  useEffect(() => {
+    if (
+      operations.completionRevision === 0 ||
+      operations.status?.state !== "idle" ||
+      refreshedOperationRevision.current >= operations.completionRevision
+    ) {
+      return;
+    }
+    refreshedOperationRevision.current = operations.completionRevision;
+    // A successful workspace refresh advances its request revision, which
+    // sequences a fresh configuration load against that new native evidence.
+    void refreshWorkspace();
+  }, [
+    operations.completionRevision,
+    operations.status?.state,
+    refreshWorkspace,
+  ]);
 
   useEffect(() => {
     if (configuration.snapshot?.state === "creation_required") {
@@ -236,8 +279,14 @@ export function OverviewPage({
     },
   ];
 
+  const operationStatus = operationSignal(operations);
+
   return (
-    <AppShell runtimeStatus={signal}>
+    <AppShell
+      operationStatus={operationStatus}
+      runtimeStatus={signal}
+      workspaceStatus={nativeSignal}
+    >
       <main className="am-main" id="main-content">
         <header className="am-page-heading">
           <div>
@@ -262,7 +311,8 @@ export function OverviewPage({
             workspace.phase !== "idle" ||
             configuration.phase !== "idle" ||
             configurationMutationPending ||
-            configurationRecoveryPending
+            configurationRecoveryPending ||
+            operations.blocksWorkspaceMutations
           }
           trustBlocked={workspaceBlocksRuntime}
         />
@@ -277,6 +327,14 @@ export function OverviewPage({
           <ConfigurationPanel
             controller={configuration}
             interactionsEnabled={configurationInteractionsEnabled}
+          />
+        ) : null}
+        {configurationActivationKey !== null ||
+        operations.status?.state === "active" ||
+        operations.latest?.state === "available" ? (
+          <OperationsPanel
+            controller={operations}
+            executionReady={operationStartEligible}
           />
         ) : null}
 

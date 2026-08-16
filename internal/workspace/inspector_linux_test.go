@@ -69,6 +69,31 @@ challenges:
 	}
 }
 
+func TestVerifyAllowsNativeChildDirectoryChurnWithoutLosingSelectedIdentity(t *testing.T) {
+	t.Parallel()
+	working := secureTempDir(t)
+	storage := mkdir(t, filepath.Join(working, "storage"), 0o700)
+	webroot := mkdir(t, filepath.Join(working, "webroot"), 0o700)
+	writeFile(t, filepath.Join(working, ".lego.yml"), []byte("storage: storage\nchallenges:\n  http:\n    http:\n      webroot: webroot\n"), 0o600)
+	inspector, err := NewInspector(DefaultPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := inspector.Inspect(context.Background(), Request{WorkingDirectory: working})
+	if err != nil || !review.Adoptable {
+		t.Fatalf("Inspect() review = %#v, error = %v", review, err)
+	}
+	mkdir(t, filepath.Join(storage, "accounts"), 0o700)
+	mkdir(t, filepath.Join(webroot, ".well-known"), 0o700)
+	current, err := inspector.Verify(context.Background(), review)
+	if err != nil {
+		t.Fatalf("Verify() rejected native child-directory churn: %v", err)
+	}
+	if current.Storage.Inode != review.Storage.Inode || current.Webroots[0].Inode != review.Webroots[0].Inode {
+		t.Fatal("selected directory identity changed during churn test")
+	}
+}
+
 func TestInspectUsesConventionalNamePrecedence(t *testing.T) {
 	t.Parallel()
 
@@ -484,6 +509,13 @@ func TestVerifyIgnoresVolatileAncestorDirectoryLinkCount(t *testing.T) {
 	mutated.WorkingDirectory.NLink++
 	if ReviewFingerprint(mutated) == review.ReviewedEvidenceSHA256 {
 		t.Fatal("selected working-directory link count was not fingerprinted")
+	}
+	if ExecutionReviewFingerprint(mutated) != ExecutionReviewFingerprint(review) {
+		t.Fatal("native directory child churn changed execution evidence")
+	}
+	mutated.WorkingDirectory.Inode++
+	if ExecutionReviewFingerprint(mutated) == ExecutionReviewFingerprint(review) {
+		t.Fatal("selected directory replacement did not change execution evidence")
 	}
 }
 

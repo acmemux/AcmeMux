@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -129,6 +130,11 @@ func (reader *Reader) Read(
 	defer cancelRun()
 	standardOutput := newBoundedOutput(reader.policy.StdoutLimit, cancelRun)
 	errorOutput := newBoundedSink(reader.policy.StderrLimit, cancelRun)
+	// Pdeathsig is tied to the creating Linux thread, not merely the parent
+	// process. Keep that thread alive until Wait completes so Go runtime thread
+	// retirement cannot kill a healthy inventory child.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	command, err := prepared.StartContext(
 		runContext,
 		func(command *exec.Cmd) error {

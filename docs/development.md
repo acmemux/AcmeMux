@@ -64,6 +64,33 @@ review continuity, authenticated preview and save, redaction, concurrent
 changes, crash boundaries, and non-replay recovery. The aggregate
 `make verify` remains authoritative.
 
+The manual-operation boundary has focused suites as well:
+
+```sh
+make test-broker
+make test-jobs
+make test-redaction
+ACMEMUX_TEST_LEGO=/absolute/path/to/source-built/lego \
+ACMEMUX_TEST_PEBBLE=/absolute/path/to/pebble-v2.10.1 \
+ACMEMUX_TEST_CHALLTESTSRV=/absolute/path/to/pebble-challtestsrv-v2.10.1 \
+ACMEMUX_TEST_LEGO_SOURCE=/absolute/path/to/lego-source \
+make test-lego-integration
+```
+
+The broker suite covers exact direct arguments and environment, no-shell
+execution, path and input bounds, split-stream value redaction, output limits,
+timeouts, signals, process groups, escaped descendants, and prepared-runtime
+ownership. The jobs and operation suites cover durable enqueue, browser-context
+separation, restart behavior, shared-lock exclusion, fresh native preflight,
+result classification, and mandatory inventory reconciliation. The opt-in
+source-built check requires explicit canonical paths for the reviewed
+executable, pinned Pebble v2.10.1 and challenge-server executables, and the
+matching upstream source fixtures; none are selected from the host `PATH`.
+It starts the local upstream ACME infrastructure, obtains a real test
+certificate through the broker, verifies native account and certificate
+artifacts, then runs file mode again and proves upstream evaluated and skipped
+a not-due renewal without rewriting the issued artifacts.
+
 `make run` requires `ACMEMUX_PUBLIC_ORIGIN` to name the HTTPS address served by
 the local reverse proxy. Direct HTTP remains available for health probes, but
 it is deliberately not an authenticated browser-development mode.

@@ -8,7 +8,9 @@ import (
 	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
 	"github.com/sgurden-certleap/AcmeMux/internal/configuration"
 	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
+	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
 	"github.com/sgurden-certleap/AcmeMux/internal/nativeconfig"
+	"github.com/sgurden-certleap/AcmeMux/internal/operation"
 	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
@@ -137,4 +139,28 @@ func (inertConfigurationService) ResolveRecovery(context.Context, string, worksp
 
 func testConfigurationDependencies() ConfigurationDependencies {
 	return ConfigurationDependencies{Service: inertConfigurationService{}}
+}
+
+type inertOperationService struct{}
+
+func (inertOperationService) Preview(context.Context) (operation.Preview, error) {
+	return operation.Preview{}, errors.New("unexpected operation preview")
+}
+
+func (inertOperationService) Enqueue(context.Context, string, workspace.CommitGuard) (jobs.Operation, error) {
+	return jobs.Operation{}, errors.New("unexpected operation enqueue")
+}
+
+func (inertOperationService) Status(context.Context) (jobs.Operation, error) {
+	return jobs.Operation{}, jobs.ErrNotFound
+}
+
+func (inertOperationService) Latest(context.Context) (jobs.Operation, error) {
+	return jobs.Operation{}, jobs.ErrNotFound
+}
+
+func (inertOperationService) Policy() operation.Policy { return operation.DefaultPolicy() }
+
+func testOperationDependencies() OperationDependencies {
+	return OperationDependencies{Service: inertOperationService{}}
 }

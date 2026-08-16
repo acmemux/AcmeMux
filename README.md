@@ -72,4 +72,7 @@ interrupted-edit recovery are documented in
 [docs/native-configuration.md](docs/native-configuration.md). Accepted CA
 presets, account registration prerequisites, certificate and renewal fields,
 HTTP-01 listener or webroot setup, and first-workspace creation are documented
-in [docs/ca-certificate-http.md](docs/ca-certificate-http.md).
+in [docs/ca-certificate-http.md](docs/ca-certificate-http.md). Reviewed manual
+workspace runs, durable browser-independent execution, the exact constrained
+process boundary, reconciliation, and safe failure handling are documented in
+[docs/manual-operations.md](docs/manual-operations.md).

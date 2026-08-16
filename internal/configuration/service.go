@@ -18,10 +18,11 @@ import (
 )
 
 var (
-	ErrBusy        = errors.New("native configuration service is busy")
-	ErrChanged     = errors.New("native configuration changed after review")
-	ErrInvalid     = errors.New("native configuration request is invalid")
-	ErrUnavailable = errors.New("native configuration service is unavailable")
+	ErrBusy           = errors.New("native configuration service is busy")
+	ErrChanged        = errors.New("native configuration changed after review")
+	ErrRuntimeChanged = errors.New("selected runtime changed")
+	ErrInvalid        = errors.New("native configuration request is invalid")
+	ErrUnavailable    = errors.New("native configuration service is unavailable")
 )
 
 type State string
@@ -250,11 +251,11 @@ func (service *Service) loadRuntime(ctx context.Context) (runtimeContext, error)
 	}
 	observation, err := service.runtimeInspector.Verify(ctx, selection.Observation)
 	if err != nil {
-		return runtimeContext{}, fmt.Errorf("%w: selected runtime changed", ErrChanged)
+		return runtimeContext{}, fmt.Errorf("%w: %w", ErrChanged, ErrRuntimeChanged)
 	}
 	decision := service.classify(observation)
 	if !decision.Compatible() || string(decision.ManifestID) != selection.ManifestID {
-		return runtimeContext{}, fmt.Errorf("%w: selected runtime manifest", ErrChanged)
+		return runtimeContext{}, fmt.Errorf("%w: %w", ErrChanged, ErrRuntimeChanged)
 	}
 	engine, manifest, err := service.engineFactory(decision.ManifestID)
 	if err != nil {

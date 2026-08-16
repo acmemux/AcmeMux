@@ -27,6 +27,7 @@ import {
   type WorkspaceSnapshot,
 } from "../api/workspace";
 import { WorkspacePanel, type WorkspaceController } from "./WorkspacePanel";
+import { idleOperationClient } from "../../tests/support/operations";
 
 const runtimeEvidence: RuntimeEvidence = {
   canonicalPath: "/usr/local/bin/lego",
@@ -106,7 +107,11 @@ const readyConfigurationClient: ConfigurationClient = {
 
 function App(props: ComponentProps<typeof ProductApp>) {
   return (
-    <ProductApp configurationClient={readyConfigurationClient} {...props} />
+    <ProductApp
+      configurationClient={readyConfigurationClient}
+      operationClient={idleOperationClient}
+      {...props}
+    />
   );
 }
 
@@ -1442,6 +1447,7 @@ describe("workspace adoption", () => {
     const refresh = screen.getByRole("button", {
       name: "Check workspace again",
     });
+    await waitFor(() => expect(refresh).toBeEnabled());
     fireEvent.click(refresh);
     fireEvent.click(refresh);
 

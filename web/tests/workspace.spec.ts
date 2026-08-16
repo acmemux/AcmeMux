@@ -9,10 +9,12 @@ import {
   reviewedWorkspaceCandidate,
   workspaceCertificate,
 } from "./support/workspace";
+import { mockOperations } from "./support/operations";
 
 test.beforeEach(async ({ page }) => {
   await mockSession(page);
   await mockConfiguration(page);
+  await mockOperations(page);
 });
 
 test("reviews every native path before adopting a conventional workspace", async ({

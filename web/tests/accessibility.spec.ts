@@ -15,6 +15,7 @@ import {
   recoveryConfiguration,
   unsupportedConfiguration,
 } from "./support/configuration";
+import { mockOperations, partialOperationResult } from "./support/operations";
 
 const desktopViewport = { width: 1440, height: 1000 };
 
@@ -31,6 +32,7 @@ test.describe("application accessibility", () => {
     await mockSession(page);
     await mockRuntime(page);
     await mockWorkspace(page);
+    await mockOperations(page);
   });
 
   test("default desktop shell has no WCAG A or AA violations", async ({
@@ -277,6 +279,53 @@ test.describe("application accessibility", () => {
     await expectNoWcagViolations(page);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toBeHidden();
+  });
+
+  test("manual operation review is keyboard reachable and has no WCAG A or AA violations", async ({
+    page,
+  }) => {
+    await page.setViewportSize(desktopViewport);
+    await mockRuntime(page, { initial: supportedRuntime });
+    await mockWorkspace(page, { initial: readyWorkspace });
+    await mockConfiguration(page);
+    await page.goto("/");
+
+    const preview = page.getByRole("button", {
+      name: "Preview manual workspace operation",
+    });
+    await expect(preview).toBeEnabled();
+    await preview.focus();
+    await expect(preview).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expectNoWcagViolations(page);
+    const acknowledgment = page.getByRole("checkbox", {
+      name: /I reviewed the runtime, native paths, configured certificate targets/i,
+    });
+    await acknowledgment.focus();
+    await expect(acknowledgment).toBeFocused();
+  });
+
+  test("partial manual result has no WCAG A or AA violations", async ({
+    page,
+  }) => {
+    await page.setViewportSize(desktopViewport);
+    await mockRuntime(page, { initial: supportedRuntime });
+    await mockWorkspace(page, { initial: readyWorkspace });
+    await mockConfiguration(page);
+    await mockOperations(page, {
+      initialLatest: {
+        state: "available",
+        result: partialOperationResult,
+      },
+    });
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Partially completed" }),
+    ).toBeVisible();
+    await expectNoWcagViolations(page);
   });
 });
 
