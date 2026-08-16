@@ -7,7 +7,7 @@ GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
 export GOMODCACHE := $(CURDIR)/.cache/go-mod
 
-.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-reporting test-runtime test-scheduler test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog distribution format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-distribution test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-reporting test-runtime test-scheduler test-systemd test-upgrade test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -134,8 +134,27 @@ build: web-build
 	mkdir -p dist
 	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o dist/acmemux ./cmd/acmemux
 
+distribution: toolchain-check build
+	cd dist && sha256sum acmemux > acmemux.sha256
+
+test-distribution: distribution
+	shellcheck distribution/lib.sh distribution/install.sh distribution/upgrade.sh distribution/remove.sh distribution/tests/*.sh
+	distribution/tests/install_test.sh
+	@first="$$(sha256sum dist/acmemux | awk '{ print $$1 }')"; \
+		$(MAKE) --no-print-directory build >/dev/null; \
+		second="$$(sha256sum dist/acmemux | awk '{ print $$1 }')"; \
+		test "$$first" = "$$second" || (echo "source build is not reproducible" && exit 1)
+
+test-upgrade: distribution
+	distribution/tests/upgrade_test.sh
+
+test-systemd: distribution
+	distribution/tests/unit_verify.sh
+	distribution/tests/systemd_smoke.sh
+	distribution/tests/native_install_smoke.sh
+
 run: web-build
 	@test -n "$(ACMEMUX_PUBLIC_ORIGIN)" || (echo "ACMEMUX_PUBLIC_ORIGIN must name the HTTPS browser origin" && exit 1)
 	go run ./cmd/acmemux serve --state-dir ./var
 
-verify: toolchain-check format-check lint test test-race vuln web-verify test-browser build
+verify: toolchain-check format-check lint test test-race vuln web-verify test-browser build test-distribution test-upgrade test-systemd

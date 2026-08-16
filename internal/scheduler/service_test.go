@@ -61,6 +61,39 @@ func (operations *fakeOperations) callCount() int {
 	return operations.calls
 }
 
+func TestServiceReportsReadyOnlyAfterStartupRecovery(t *testing.T) {
+	database, err := state.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	operationsReady := make(chan struct{})
+	service, err := New(database, &fakeOperations{ready: operationsReady}, &fakeClock{now: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- service.Run(ctx) }()
+	select {
+	case <-service.Ready():
+		cancel()
+		t.Fatal("scheduler reported ready before operation recovery")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(operationsReady)
+	select {
+	case <-service.Ready():
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("scheduler did not report ready after startup recovery")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestServiceTriggersPersistedDueScheduleAfterRestartAndDefersContention(t *testing.T) {
 	database, err := state.Open(filepath.Join(t.TempDir(), "state"))
 	if err != nil {

@@ -16,7 +16,7 @@ The administrator can be created or recovered only from a local controlling term
 - `reset-password` replaces the password and revokes all browser sessions.
 - `revoke-sessions` keeps the password and revokes all sessions.
 
-Run these commands as the AcmeMux service account against the same state directory used by the service. Passwords are prompted twice without terminal echo and must contain at least 12 Unicode characters. They are never accepted as command-line arguments or environment variables.
+Run these commands as the configured AcmeMux service account against the same state directory used by the service, normally with `sudo -u acmemux`. Passwords are prompted twice without terminal echo and must contain at least 12 Unicode characters. They are never accepted as command-line arguments or environment variables.
 
 There is no browser bootstrap, email recovery, invitation, user management, or role system.
 
@@ -47,6 +47,10 @@ Do not place authentication material in URLs, browser storage, scripts, proxy lo
 ## Service account and filesystem
 
 Run AcmeMux under a dedicated non-root account with no unrelated supplementary groups or Linux capabilities. Do not share that account with other applications. Another process running as the same account can read or change service-owned files and is inside the trusted-host boundary.
+
+The supported source installation uses a hardened systemd unit. The executable and service definition are root-owned; systemd creates private state and runtime directories for the configured identity; logs remain in the journal. The unit removes capabilities and privilege escalation, restricts devices, namespaces, kernel controls, and address families, and makes system paths read-only. It intentionally does not hide the service identity's home or restrict arbitrary data paths because the adopted native workspace, cloud credential files, helper tools, storage, and webroots remain administrator-selected host resources.
+
+If `ProtectSystem=full` covers a required writable workspace beneath `/etc` or `/usr`, add only that exact reviewed path with a `ReadWritePaths` service drop-in. Do not disable the complete hardening profile merely to make an unsafe layout run. A local AppArmor profile must likewise allow only the paths, helpers, and network access required by the selected integrations.
 
 Protect:
 
