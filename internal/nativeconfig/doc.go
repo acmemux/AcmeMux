@@ -1,3 +1,3 @@
-// Package nativeconfig projects and safely edits supported native lego fields.
-// Native editing behavior is introduced by its dedicated delivery task.
+// Package nativeconfig parses, projects, validates, and patches server-curated
+// fields in authoritative native lego YAML without owning filesystem state.
 package nativeconfig

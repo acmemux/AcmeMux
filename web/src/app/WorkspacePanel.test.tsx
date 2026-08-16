@@ -6,8 +6,10 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { vi } from "vitest";
+import type { ComponentProps } from "react";
 
-import { App } from "../App";
+import { App as ProductApp } from "../App";
+import type { ConfigurationClient } from "../api/configuration";
 import type {
   RuntimeCandidate,
   RuntimeClient,
@@ -81,6 +83,30 @@ const authenticatedSession: SessionClient = {
   signIn: vi.fn(async () => ({ state: "authenticated" as const })),
   signOut: vi.fn(async () => undefined),
 };
+
+const readyConfigurationClient: ConfigurationClient = {
+  getConfiguration: vi.fn(async () => ({
+    state: "ready" as const,
+    source: {
+      baseRevisionToken: "A".repeat(43),
+      configurationPath: "/srv/lego/.lego.yml",
+      dotenvPaths: ["/srv/lego/cloudflare.env"],
+      runtimeManifestId: "lego-v5.3.1",
+    },
+    projection: [],
+    diagnostics: [],
+    capabilities: { editing: true, execution: true },
+  })),
+  previewChanges: vi.fn(),
+  saveChanges: vi.fn(),
+  resolveRecovery: vi.fn(),
+};
+
+function App(props: ComponentProps<typeof ProductApp>) {
+  return (
+    <ProductApp configurationClient={readyConfigurationClient} {...props} />
+  );
+}
 
 const pathMetadata = {
   uid: 991,
@@ -495,6 +521,7 @@ describe("workspace adoption", () => {
     );
 
     await screen.findByRole("heading", { name: "Native workspace ready" });
+    await screen.findByText("Configuration engine ready");
     await act(async () =>
       fireEvent.click(
         screen.getByRole("button", { name: "Inspect executable" }),
@@ -548,6 +575,7 @@ describe("workspace adoption", () => {
     );
 
     await screen.findByRole("heading", { name: "Native workspace ready" });
+    await screen.findByText("Configuration engine ready");
     await act(async () =>
       fireEvent.click(
         screen.getByRole("button", { name: "Inspect executable" }),
@@ -625,6 +653,36 @@ describe("workspace adoption", () => {
     expect(
       await screen.findByRole("heading", { name: "Native workspace ready" }),
     ).toHaveFocus();
+  });
+
+  it("explains that pending native configuration recovery blocks workspace changes", async () => {
+    const client = workspaceClientWith(
+      { state: "unadopted" },
+      reviewCandidate,
+      {
+        inspectCandidate: vi.fn(async () => {
+          throw new WorkspaceRequestError("recovery_required", 409);
+        }),
+      },
+    );
+    render(
+      <App
+        runtimeClient={supportedRuntimeClient}
+        sessionClient={authenticatedSession}
+        workspaceClient={client}
+      />,
+    );
+
+    await inspectWorkspace();
+
+    expect(
+      await screen.findByText("Workspace unavailable"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Native configuration recovery is required. Reconcile the interrupted edit before inspecting or adopting workspace paths.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("returns precise inventory evidence and resets confirmation when adoption is blocked", async () => {
@@ -923,6 +981,7 @@ describe("workspace adoption", () => {
       phase: "idle",
       readyFocusRequested: false,
       refresh: vi.fn(async () => undefined),
+      requestRevision: 1,
       runtimeRecheckRequired: false,
       setConfigurationPath: vi.fn(),
       setWorkingDirectory: vi.fn(),
@@ -969,6 +1028,7 @@ describe("workspace adoption", () => {
       phase: "idle",
       readyFocusRequested: false,
       refresh: vi.fn(async () => undefined),
+      requestRevision: 1,
       runtimeRecheckRequired: false,
       setConfigurationPath: vi.fn(),
       setWorkingDirectory: vi.fn(),

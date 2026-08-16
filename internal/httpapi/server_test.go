@@ -54,7 +54,7 @@ func sharedTestIdentity(t *testing.T) *identity.Service {
 
 func newTestHandler(t *testing.T, readiness Readiness, assets fstest.MapFS) http.Handler {
 	t.Helper()
-	handler, err := New(readiness, sharedTestIdentity(t), testRuntimeDependencies(), testWorkspaceDependencies(), assets, SecurityConfig{PublicOrigin: testPublicOrigin})
+	handler, err := New(readiness, sharedTestIdentity(t), testRuntimeDependencies(), testWorkspaceDependencies(), testConfigurationDependencies(), assets, SecurityConfig{PublicOrigin: testPublicOrigin})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -137,7 +137,7 @@ func TestNewRejectsInvalidSecurityConfiguration(t *testing.T) {
 	t.Parallel()
 
 	for _, origin := range []string{"", "http://acmemux.example", "https://AcmeMux.example", "https://acmemux.example/", "https://acmemux.example:443"} {
-		if _, err := New(readinessStub{}, sharedTestIdentity(t), testRuntimeDependencies(), testWorkspaceDependencies(), fstest.MapFS{}, SecurityConfig{PublicOrigin: origin}); err == nil {
+		if _, err := New(readinessStub{}, sharedTestIdentity(t), testRuntimeDependencies(), testWorkspaceDependencies(), testConfigurationDependencies(), fstest.MapFS{}, SecurityConfig{PublicOrigin: origin}); err == nil {
 			t.Errorf("New(PublicOrigin=%q) error = nil", origin)
 		}
 	}

@@ -135,6 +135,81 @@ func TestStoreSurvivesDatabaseReopenAndRetainsNanoseconds(t *testing.T) {
 	}
 }
 
+func TestStoreAtomicallyUpgradesLegacyReviewFingerprintAndRejectsTampering(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		tamper bool
+	}{
+		{name: "upgrade"},
+		{name: "tampered legacy evidence", tamper: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stateDirectory := t.TempDir()
+			database, err := state.Open(stateDirectory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := NewStore(database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			selection := workspaceSelectionFixture(t, false)
+			if err := store.Save(context.Background(), selection); err != nil {
+				t.Fatal(err)
+			}
+			legacy := legacyReviewFingerprintV1(selection.Review)
+			if _, err := database.ExecContext(context.Background(),
+				"UPDATE workspace_selection SET reviewed_evidence_sha256 = ?", legacy,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if test.tamper {
+				if _, err := database.ExecContext(context.Background(),
+					"UPDATE workspace_path_observation SET inode_decimal = '999999' WHERE path_ordinal = 2",
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := database.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			database, err = state.Open(stateDirectory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			store, err = NewStore(database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := store.Load(context.Background())
+			if test.tamper {
+				if !errors.Is(err, ErrInvalidSelection) {
+					t.Fatalf("Load(tampered legacy) error = %v, want ErrInvalidSelection", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load(legacy) error = %v", err)
+			}
+			if loaded.Review.ReviewedEvidenceSHA256 != ReviewFingerprint(loaded.Review) ||
+				loaded.Review.ReviewedEvidenceSHA256 == legacy {
+				t.Fatalf("legacy fingerprint was not upgraded: %#v", loaded.Review)
+			}
+			var persisted string
+			if err := database.QueryRowContext(context.Background(),
+				"SELECT reviewed_evidence_sha256 FROM workspace_selection WHERE singleton_id = 1",
+			).Scan(&persisted); err != nil {
+				t.Fatal(err)
+			}
+			if persisted != loaded.Review.ReviewedEvidenceSHA256 {
+				t.Fatalf("persisted fingerprint = %q, want %q", persisted, loaded.Review.ReviewedEvidenceSHA256)
+			}
+		})
+	}
+}
+
 func TestStoreRejectsInvalidSelectionWithoutReplacingCurrent(t *testing.T) {
 	t.Parallel()
 

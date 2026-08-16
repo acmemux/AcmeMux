@@ -34,6 +34,7 @@ export type WorkspaceController = {
   error: string | null;
   phase: WorkspacePhase;
   readyFocusRequested: boolean;
+  requestRevision: number;
   runtimeRecheckRequired: boolean;
   snapshot: WorkspaceSnapshot | null;
   workingDirectory: string;
@@ -53,6 +54,8 @@ function safeRequestMessage(error: unknown): string {
   switch (error.code) {
     case "workspace_changed":
       return "The workspace changed after review. Inspect every path again before adoption.";
+    case "recovery_required":
+      return "Native configuration recovery is required. Reconcile the interrupted edit before inspecting or adopting workspace paths.";
     case "service_busy":
       return "Another bounded workspace inspection is already running. Try again after it finishes.";
     case "invalid_request":
@@ -102,6 +105,7 @@ export function useWorkspaceController(
   const [phase, setPhase] = useState<WorkspacePhase>("loading");
   const [error, setError] = useState<string | null>(null);
   const [readyFocusRequested, setReadyFocusRequested] = useState(false);
+  const [requestRevision, setRequestRevision] = useState(0);
   const [workingDirectory, setWorkingDirectoryValue] = useState("");
   const [configurationPath, setConfigurationPathValue] = useState("");
   const [workingDirectoryError, setWorkingDirectoryError] = useState<
@@ -176,6 +180,7 @@ export function useWorkspaceController(
       const next = await client.getWorkspace();
       if (requestVersion.current === version) {
         applySnapshot(next);
+        setRequestRevision(version);
       }
     } catch (requestError) {
       if (
@@ -211,6 +216,7 @@ export function useWorkspaceController(
         const next = await client.getWorkspace();
         if (requestVersion.current === version) {
           applySnapshot(next);
+          setRequestRevision(version);
           setCandidate(null);
           setError(null);
           setReadyFocusRequested(false);
@@ -336,6 +342,7 @@ export function useWorkspaceController(
           setReadyFocusRequested(false);
         } else {
           applySnapshot(next);
+          setRequestRevision(version);
           setCandidate(null);
           setReadyFocusRequested(next.state === "ready");
         }
@@ -370,6 +377,7 @@ export function useWorkspaceController(
     inspect,
     phase: activationKey === null ? "idle" : active ? phase : "loading",
     readyFocusRequested: active && readyFocusRequested,
+    requestRevision,
     refresh,
     runtimeRecheckRequired:
       active && runtimeBlockedActivationKey === activationKey,
@@ -1091,11 +1099,13 @@ function SelectedWorkspace({
 
 function CandidateReview({
   candidate,
+  interactionsEnabled,
   isAdopting,
   onAdopt,
   runtimeReady,
 }: {
   candidate: WorkspaceCandidate;
+  interactionsEnabled: boolean;
   isAdopting: boolean;
   onAdopt: () => Promise<void>;
   runtimeReady: boolean;
@@ -1146,7 +1156,7 @@ function CandidateReview({
         <label className="am-workspace-confirmation">
           <input
             checked={reviewed}
-            disabled={isAdopting || !runtimeReady}
+            disabled={isAdopting || !interactionsEnabled || !runtimeReady}
             onChange={(event) => setReviewed(event.currentTarget.checked)}
             type="checkbox"
           />
@@ -1169,7 +1179,11 @@ function CandidateReview({
       <div className="am-workspace-actions">
         <ActionButton
           isDisabled={
-            !runtimeReady || !candidate.adoptable || !reviewed || isAdopting
+            !runtimeReady ||
+            !candidate.adoptable ||
+            !reviewed ||
+            isAdopting ||
+            !interactionsEnabled
           }
           isPending={isAdopting}
           onPress={() => void onAdopt()}
@@ -1236,6 +1250,7 @@ export function WorkspacePanel({
   const busy = controller.phase !== "idle";
   const inspectionDisabled =
     busy ||
+    !interactionsEnabled ||
     !runtimeReady ||
     (Boolean(controller.error) && !controller.snapshot);
 
@@ -1341,6 +1356,7 @@ export function WorkspacePanel({
       {controller.candidate ? (
         <CandidateReview
           candidate={controller.candidate}
+          interactionsEnabled={interactionsEnabled}
           isAdopting={controller.phase === "adopting"}
           key={`${controller.candidate.reviewedEvidenceSha256}:${controller.candidate.adoptable ? "adoptable" : "blocked"}:${runtimeReady ? "runtime-ready" : "runtime-blocked"}`}
           onAdopt={controller.adopt}

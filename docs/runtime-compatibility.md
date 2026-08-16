@@ -143,8 +143,12 @@ The adjacent `lego.LICENSE.txt` is the complete upstream MIT license notice,
 with SHA-256
 `bf12923e71046c564f4163c00c3aa6b3581b51858f099a035f5baf2216addf6e`.
 
-The schema is evidence for later native configuration validation; it is not a
-promise that every field or compiled integration is supported by AcmeMux.
+The native configuration engine compiles this exact schema as Draft 7 with
+external resource loading disabled and combines it with source-backed semantic
+checks before preview or replacement. Passing the upstream schema is not a
+promise that every field or compiled integration is supported by AcmeMux; the
+separate curated integration manifest remains the editing and execution
+allowlist.
 
 ## Diagnostics
 

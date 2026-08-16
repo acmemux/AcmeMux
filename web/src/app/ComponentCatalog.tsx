@@ -1,9 +1,16 @@
+import { useState } from "react";
+
 import { AppShell } from "./AppShell";
 import { ActionButton } from "../components/ActionButton";
+import { ConfigurationReviewDialog } from "../components/ConfigurationReviewDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FeedbackPanel } from "../components/FeedbackPanel";
 import { FormField } from "../components/FormField";
 import { StatusBadge, type StatusTone } from "../components/StatusBadge";
+import {
+  WriteOnlySecretField,
+  type SecretDraft,
+} from "../components/WriteOnlySecretField";
 import "../styles/catalog.css";
 
 const states: Array<{ tone: StatusTone; label: string }> = [
@@ -19,6 +26,9 @@ const states: Array<{ tone: StatusTone; label: string }> = [
 ];
 
 export function ComponentCatalog() {
+  const [secretDraft, setSecretDraft] = useState<SecretDraft>({
+    action: "keep",
+  });
   return (
     <AppShell isCatalog>
       <main className="am-main am-catalog" id="main-content">
@@ -82,6 +92,33 @@ export function ComponentCatalog() {
                 <ActionButton isPending>Saving</ActionButton>
               </div>
               <ConfirmDialog />
+              <ConfigurationReviewDialog
+                executionAllowed={false}
+                onCancel={() => setSecretDraft({ action: "keep" })}
+                onConfirm={() => undefined}
+                summary={[
+                  {
+                    fieldId: "workspace.storage",
+                    bindings: [],
+                    label: "Native storage directory",
+                    file: "configuration",
+                    action: "changed",
+                    sensitive: false,
+                    before: { state: "value", value: "./data" },
+                    after: { state: "value", value: "./native-data" },
+                  },
+                  {
+                    fieldId: "provider.credential",
+                    bindings: [{ id: "challenge", value: "home" }],
+                    label: "Provider credential",
+                    file: "dotenv",
+                    action: "secret_replaced",
+                    sensitive: true,
+                    before: { state: "present_secret" },
+                    after: { state: "present_secret" },
+                  },
+                ]}
+              />
             </article>
 
             <article className="am-catalog-card">
@@ -104,6 +141,14 @@ export function ComponentCatalog() {
                   description="Unavailable until a workspace is adopted."
                   defaultValue="Not available"
                   isDisabled
+                />
+                <WriteOnlySecretField
+                  description="Existing values are never loaded into browser fields or previews."
+                  draft={secretDraft}
+                  id="catalog-write-only-secret"
+                  label="Write-only secret"
+                  onChange={setSecretDraft}
+                  presence="present"
                 />
               </div>
             </article>

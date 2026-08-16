@@ -8,6 +8,12 @@ import {
   supportedRuntime,
 } from "./support/runtime";
 import { mockWorkspace } from "./support/workspace";
+import { readyWorkspace } from "./support/workspace";
+import {
+  mockConfiguration,
+  recoveryConfiguration,
+  unsupportedConfiguration,
+} from "./support/configuration";
 
 const desktopViewport = { width: 1440, height: 1000 };
 
@@ -228,6 +234,47 @@ test.describe("application accessibility", () => {
       page.getByRole("heading", { name: "Review native workspace evidence" }),
     ).toBeVisible();
     await expectNoWcagViolations(page);
+  });
+
+  for (const [name, configuration] of [
+    ["unsupported", unsupportedConfiguration],
+    ["recovery", recoveryConfiguration],
+  ] as const) {
+    test(`${name} configuration state has no WCAG A or AA violations`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(desktopViewport);
+      await mockRuntime(page, { initial: supportedRuntime });
+      await mockWorkspace(page, { initial: readyWorkspace });
+      await mockConfiguration(page, { initial: configuration });
+      await page.goto("/");
+
+      await expect(
+        page.getByRole("heading", { name: "Configuration mediation" }),
+      ).toBeVisible();
+      await expectNoWcagViolations(page);
+    });
+  }
+
+  test("write-only secret and review controls are keyboard reachable", async ({
+    page,
+  }) => {
+    await page.setViewportSize(desktopViewport);
+    await page.goto("/?catalog=components");
+
+    const replace = page.getByRole("radio", { name: "Replace value" });
+    await replace.focus();
+    await expect(replace).toBeFocused();
+    await replace.check();
+    const secret = page.getByLabel("New secret value");
+    await expect(secret).toBeVisible();
+    await expect(secret).toHaveValue("");
+
+    await page.getByRole("button", { name: /Review 2 native changes/ }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expectNoWcagViolations(page);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
   });
 });
 

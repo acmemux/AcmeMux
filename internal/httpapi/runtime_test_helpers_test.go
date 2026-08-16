@@ -3,9 +3,12 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
+	"github.com/sgurden-certleap/AcmeMux/internal/configuration"
 	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
+	"github.com/sgurden-certleap/AcmeMux/internal/nativeconfig"
 	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
 	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
 )
@@ -30,10 +33,33 @@ func (inertRuntimeSelections) Save(context.Context, acmeruntime.Selection) error
 	return errors.New("unexpected runtime selection save")
 }
 
+type nativeEditJournalStub struct {
+	pending bool
+	err     error
+	loads   int
+}
+
+func (stub *nativeEditJournalStub) Load(context.Context) (workspace.Journal, error) {
+	stub.loads++
+	if stub.err != nil {
+		return workspace.Journal{}, stub.err
+	}
+	if stub.pending {
+		return workspace.Journal{TransactionID: strings.Repeat("a", 32)}, nil
+	}
+	return workspace.Journal{}, workspace.ErrNoEditJournal
+}
+
+func clearNativeEditJournal() NativeEditJournal {
+	return &nativeEditJournalStub{}
+}
+
 func testRuntimeDependencies() RuntimeDependencies {
 	return RuntimeDependencies{
-		Inspector:  inertRuntimeInspector{},
-		Selections: inertRuntimeSelections{},
+		Inspector:        inertRuntimeInspector{},
+		Selections:       inertRuntimeSelections{},
+		AcquireWorkspace: testWorkspaceLease,
+		EditJournal:      clearNativeEditJournal(),
 		Classify: func(acmeruntime.Observation) compatibility.Result {
 			return compatibility.Result{Code: compatibility.CodeUnknownIdentity}
 		},
@@ -68,11 +94,39 @@ func (inertWorkspaceInventory) Read(context.Context, inventory.PreparedExecutabl
 
 func testWorkspaceDependencies() WorkspaceDependencies {
 	return WorkspaceDependencies{
-		Inspector:  inertWorkspaceInspector{},
-		Selections: inertWorkspaceSelections{},
-		Inventory:  inertWorkspaceInventory{},
+		Inspector:        inertWorkspaceInspector{},
+		Selections:       inertWorkspaceSelections{},
+		Inventory:        inertWorkspaceInventory{},
+		AcquireWorkspace: testWorkspaceLease,
+		EditJournal:      clearNativeEditJournal(),
 		PrepareRuntime: func(context.Context) (inventory.PreparedExecutable, error) {
 			return nil, errors.New("unexpected runtime preparation")
 		},
 	}
+}
+
+func testWorkspaceLease(context.Context, workspace.Purpose) (func() error, error) {
+	return func() error { return nil }, nil
+}
+
+type inertConfigurationService struct{}
+
+func (inertConfigurationService) Snapshot(context.Context) (configuration.View, error) {
+	return configuration.View{}, errors.New("unexpected configuration snapshot")
+}
+
+func (inertConfigurationService) Preview(context.Context, string, []nativeconfig.Change) (configuration.Preview, error) {
+	return configuration.Preview{}, errors.New("unexpected configuration preview")
+}
+
+func (inertConfigurationService) Save(context.Context, string, []nativeconfig.Change, string, workspace.CommitGuard) (configuration.View, error) {
+	return configuration.View{}, errors.New("unexpected configuration save")
+}
+
+func (inertConfigurationService) ResolveRecovery(context.Context, string, workspace.RecoveryResolution, workspace.CommitGuard) (configuration.View, error) {
+	return configuration.View{}, errors.New("unexpected configuration recovery")
+}
+
+func testConfigurationDependencies() ConfigurationDependencies {
+	return ConfigurationDependencies{Service: inertConfigurationService{}}
 }

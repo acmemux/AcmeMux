@@ -25,6 +25,7 @@ func New(
 	identityService *identity.Service,
 	runtimeDependencies RuntimeDependencies,
 	workspaceDependencies WorkspaceDependencies,
+	configurationDependencies ConfigurationDependencies,
 	assets fs.FS,
 	config SecurityConfig,
 ) (http.Handler, error) {
@@ -44,6 +45,10 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	configurationAPI, err := newConfigurationEndpoints(identityAPI, configurationDependencies)
+	if err != nil {
+		return nil, err
+	}
 	multiplexer := http.NewServeMux()
 	multiplexer.HandleFunc("GET /healthz", func(response http.ResponseWriter, _ *http.Request) {
 		writeJSON(response, http.StatusOK, map[string]string{"status": "healthy"})
@@ -60,6 +65,7 @@ func New(
 	identityAPI.register(multiplexer)
 	runtimeAPI.register(multiplexer)
 	workspaceAPI.register(multiplexer)
+	configurationAPI.register(multiplexer)
 	multiplexer.HandleFunc("/api", apiNotFound)
 	multiplexer.HandleFunc("/api/", apiNotFound)
 	multiplexer.Handle("/", browserHandler(assets))

@@ -3,6 +3,11 @@ import { expect, test } from "@playwright/test";
 import { mockSession } from "./support/session";
 import { mockRuntime, supportedRuntime } from "./support/runtime";
 import { mockWorkspace, readyWorkspace } from "./support/workspace";
+import {
+  mockConfiguration,
+  recoveryConfiguration,
+  unsupportedConfiguration,
+} from "./support/configuration";
 
 const fullPageSnapshot = {
   animations: "disabled" as const,
@@ -47,6 +52,7 @@ test.describe("wide visual contract", () => {
     await mockSession(page);
     await mockRuntime(page, { initial: supportedRuntime });
     await mockWorkspace(page, { initial: readyWorkspace });
+    await mockConfiguration(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Native workspace ready" }),
@@ -54,6 +60,19 @@ test.describe("wide visual contract", () => {
     await expect(page.getByText("gateway.home.example").first()).toBeVisible();
     await expect(page).toHaveScreenshot(
       "workspace-ready-wide.png",
+      fullPageSnapshot,
+    );
+  });
+
+  test("unsupported native configuration", async ({ page }) => {
+    await mockSession(page);
+    await mockRuntime(page, { initial: supportedRuntime });
+    await mockWorkspace(page, { initial: readyWorkspace });
+    await mockConfiguration(page, { initial: unsupportedConfiguration });
+    await page.goto("/");
+    await expect(page.getByText("Native content unsupported")).toBeVisible();
+    await expect(page).toHaveScreenshot(
+      "configuration-unsupported-wide.png",
       fullPageSnapshot,
     );
   });
@@ -121,12 +140,26 @@ test.describe("narrow visual contract", () => {
     await mockSession(page);
     await mockRuntime(page, { initial: supportedRuntime });
     await mockWorkspace(page, { initial: readyWorkspace });
+    await mockConfiguration(page);
     await page.goto("/");
     await expect(
       page.getByRole("heading", { name: "Native workspace ready" }),
     ).toBeVisible();
     await expect(page).toHaveScreenshot(
       "workspace-ready-narrow.png",
+      fullPageSnapshot,
+    );
+  });
+
+  test("configuration recovery", async ({ page }) => {
+    await mockSession(page);
+    await mockRuntime(page, { initial: supportedRuntime });
+    await mockWorkspace(page, { initial: readyWorkspace });
+    await mockConfiguration(page, { initial: recoveryConfiguration });
+    await page.goto("/");
+    await expect(page.getByText("Recovery required").first()).toBeVisible();
+    await expect(page).toHaveScreenshot(
+      "configuration-recovery-narrow.png",
       fullPageSnapshot,
     );
   });

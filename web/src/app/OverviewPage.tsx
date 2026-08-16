@@ -13,6 +13,15 @@ import {
 } from "../api/workspace";
 import { StatusBadge } from "../components/StatusBadge";
 import {
+  browserConfigurationClient,
+  type ConfigurationClient,
+} from "../api/configuration";
+import {
+  ConfigurationPanel,
+  configurationSignal,
+  useConfigurationController,
+} from "./ConfigurationPanel";
+import {
   RuntimePanel,
   runtimeSignal,
   useRuntimeController,
@@ -72,9 +81,11 @@ function workspaceCandidateInvalidatesCurrent(
 }
 
 export function OverviewPage({
+  configurationClient = browserConfigurationClient,
   runtimeClient = browserRuntimeClient,
   workspaceClient = browserWorkspaceClient,
 }: {
+  configurationClient?: ConfigurationClient;
   runtimeClient?: RuntimeClient;
   workspaceClient?: WorkspaceClient;
 } = {}) {
@@ -119,6 +130,27 @@ export function OverviewPage({
     workspace.snapshot?.state === "ready" &&
     !workspaceCandidateInvalidates &&
     workspace.error === null;
+  const configurationActivationKey = workspaceReady
+    ? `${workspace.requestRevision}:ready`
+    : null;
+  const configuration = useConfigurationController(
+    configurationClient,
+    configurationActivationKey,
+    runtimeInteractionsEnabled && workspace.phase === "idle",
+  );
+  const configurationRecoveryPending =
+    configuration.phase === "idle" &&
+    configuration.snapshot?.state === "recovery_required";
+  const configurationInteractionsEnabled =
+    runtimeInteractionsEnabled &&
+    workspace.phase === "idle" &&
+    configuration.phase === "idle";
+  const nativeMutationsEnabled =
+    configurationInteractionsEnabled && !configurationRecoveryPending;
+  const configurationExecutionReady =
+    configuration.phase === "idle" &&
+    configuration.error === null &&
+    configuration.snapshot?.capabilities.execution === true;
   const showWorkspace =
     runtimeReady ||
     workspace.phase === "loading" ||
@@ -142,6 +174,15 @@ export function OverviewPage({
       detail: workspaceReady
         ? "Reviewed native paths remain authoritative and unchanged."
         : "Managed operations wait for safe workspace adoption.",
+    },
+    {
+      label: "Native configuration",
+      state: workspaceReady
+        ? configurationSignal(configuration)
+        : "Unavailable",
+      detail: configurationExecutionReady
+        ? "Exact runtime schema and curated semantics accept the current native files."
+        : "Managed operations wait for supported, valid native configuration.",
     },
     {
       label: "Certificate inventory",
@@ -184,14 +225,24 @@ export function OverviewPage({
 
         <RuntimePanel
           controller={runtime}
-          externallyBusy={workspace.phase !== "idle"}
+          externallyBusy={
+            workspace.phase !== "idle" ||
+            configuration.phase !== "idle" ||
+            configurationRecoveryPending
+          }
           trustBlocked={workspaceBlocksRuntime}
         />
         {showWorkspace ? (
           <WorkspacePanel
             controller={workspace}
-            interactionsEnabled={runtimeInteractionsEnabled}
+            interactionsEnabled={nativeMutationsEnabled}
             runtimeReady={runtimeReady}
+          />
+        ) : null}
+        {configurationActivationKey !== null ? (
+          <ConfigurationPanel
+            controller={configuration}
+            interactionsEnabled={configurationInteractionsEnabled}
           />
         ) : null}
 

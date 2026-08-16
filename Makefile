@@ -7,7 +7,7 @@ GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
 export GOMODCACHE := $(CURDIR)/.cache/go-mod
 
-.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-browser test-compatibility test-identity test-inventory test-race test-runtime test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog format-check lint run test test-accessibility test-browser test-compatibility test-configuration test-filesystem test-identity test-inventory test-nativeconfig test-race test-redaction test-runtime test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -66,6 +66,18 @@ test-workspace:
 
 test-inventory:
 	go test ./internal/inventory/...
+
+test-nativeconfig:
+	go test ./internal/integrations/... ./internal/nativeconfig/... ./internal/configuration/...
+
+test-filesystem:
+	go test ./internal/workspace/... ./internal/state/...
+
+test-redaction:
+	go test ./internal/dotenv/... ./internal/redaction/...
+
+test-configuration: test-nativeconfig test-filesystem test-redaction
+	go test ./internal/httpapi/... ./cmd/acmemux/...
 
 test-accessibility:
 	cd web && npm run test:accessibility

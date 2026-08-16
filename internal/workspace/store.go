@@ -68,6 +68,65 @@ func (store *Store) Save(ctx context.Context, selection Selection) error {
 		return fmt.Errorf("begin workspace selection save: %w", err)
 	}
 	defer tx.Rollback()
+	if err := saveSelectionInTransaction(ctx, tx, selection); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit workspace selection: %w", err)
+	}
+	return nil
+}
+
+// FinalizeEdit atomically replaces the reviewed workspace evidence and
+// removes the matching native-edit recovery journal. The filesystem changes
+// have already become active when this method is called; a failure therefore
+// deliberately leaves the journal in place for explicit recovery.
+func (store *Store) FinalizeEdit(ctx context.Context, selection Selection, transactionID string) error {
+	if err := store.ready(ctx); err != nil {
+		return err
+	}
+	if !validTransactionID(transactionID) {
+		return errors.New("native edit transaction identifier is invalid")
+	}
+	if err := validateSelection(selection); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidSelection, err)
+	}
+
+	tx, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin native edit finalization: %w", err)
+	}
+	defer tx.Rollback()
+	var persistedID string
+	if err := tx.QueryRowContext(ctx,
+		"SELECT transaction_id FROM workspace_edit_journal WHERE singleton_id = ?",
+		storeSelectionID,
+	).Scan(&persistedID); err != nil {
+		return fmt.Errorf("load native edit journal for finalization: %w", err)
+	}
+	if persistedID != transactionID {
+		return errors.New("native edit journal changed before finalization")
+	}
+	if err := saveSelectionInTransaction(ctx, tx, selection); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx,
+		"DELETE FROM workspace_edit_journal WHERE singleton_id = ? AND transaction_id = ?",
+		storeSelectionID, transactionID,
+	)
+	if err != nil {
+		return fmt.Errorf("clear finalized native edit journal: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		return errors.New("native edit journal was not cleared during finalization")
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit native edit finalization: %w", err)
+	}
+	return nil
+}
+
+func saveSelectionInTransaction(ctx context.Context, tx *sql.Tx, selection Selection) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM workspace_selection WHERE singleton_id = ?", storeSelectionID); err != nil {
 		return fmt.Errorf("replace workspace selection: %w", err)
 	}
@@ -144,9 +203,6 @@ func (store *Store) Save(ctx context.Context, selection Selection) error {
 			return fmt.Errorf("save workspace diagnostic %d: %w", ordinal, err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit workspace selection: %w", err)
-	}
 	return nil
 }
 
@@ -156,7 +212,7 @@ func (store *Store) Load(ctx context.Context) (Selection, error) {
 	if err := store.ready(ctx); err != nil {
 		return Selection{}, err
 	}
-	tx, err := store.database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := store.database.BeginTx(ctx, nil)
 	if err != nil {
 		return Selection{}, fmt.Errorf("begin workspace selection load: %w", err)
 	}
@@ -214,8 +270,30 @@ func (store *Store) Load(ctx context.Context) (Selection, error) {
 		}
 	}
 	selection.Review.Diagnostics = diagnostics
+	legacyFingerprint := ""
+	currentFingerprint := ReviewFingerprint(selection.Review)
+	if selection.Review.ReviewedEvidenceSHA256 != currentFingerprint {
+		if selection.Review.ReviewedEvidenceSHA256 != legacyReviewFingerprintV1(selection.Review) {
+			return Selection{}, persistedInvalid(errors.New("review fingerprint does not match persisted evidence"))
+		}
+		legacyFingerprint = selection.Review.ReviewedEvidenceSHA256
+		selection.Review.ReviewedEvidenceSHA256 = currentFingerprint
+	}
 	if err := validateSelection(selection); err != nil {
 		return Selection{}, persistedInvalid(err)
+	}
+	if legacyFingerprint != "" {
+		result, updateErr := tx.ExecContext(ctx, `UPDATE workspace_selection
+SET reviewed_evidence_sha256 = ?
+WHERE singleton_id = ? AND reviewed_evidence_sha256 = ?`,
+			currentFingerprint, storeSelectionID, legacyFingerprint,
+		)
+		if updateErr != nil {
+			return Selection{}, fmt.Errorf("upgrade workspace review fingerprint: %w", updateErr)
+		}
+		if err := requireOneRow(result, "workspace review fingerprint upgrade"); err != nil {
+			return Selection{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return Selection{}, fmt.Errorf("finish workspace selection load: %w", err)

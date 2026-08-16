@@ -254,6 +254,20 @@ func (inspector *Inspector) confirmPath(ctx context.Context, initial auditedPath
 func samePathEvidence(left, right PathEvidence) bool {
 	left.Safe = false
 	right.Safe = false
+	// Directory entry churn changes size, mtime, and ctime without changing
+	// the selected directory's security identity. Operations create and remove
+	// private staging files in reviewed directories, so these volatile fields
+	// are live display evidence rather than stable review identity.
+	if left.Type == PathTypeDirectory {
+		left.Size = 0
+		left.ModifiedAt = time.Time{}
+		left.ChangedAt = time.Time{}
+	}
+	if right.Type == PathTypeDirectory {
+		right.Size = 0
+		right.ModifiedAt = time.Time{}
+		right.ChangedAt = time.Time{}
+	}
 	// Directory link counts change when an unrelated sibling directory is
 	// created or removed. They are audited live but are not stable identity
 	// evidence. Final selected-object NLink remains compared and fingerprinted.

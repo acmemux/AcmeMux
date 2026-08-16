@@ -66,4 +66,7 @@ session, HTTPS, and reverse-proxy operation is documented in
 selection, permissions, and upgrade qualification are documented in
 [docs/runtime-compatibility.md](docs/runtime-compatibility.md). Native workspace
 selection, path review, persistence, and certificate inventory are documented
-in [docs/workspace-adoption.md](docs/workspace-adoption.md).
+in [docs/workspace-adoption.md](docs/workspace-adoption.md). Curated native
+field projection, write-only credentials, reviewed replacement, bounds, and
+interrupted-edit recovery are documented in
+[docs/native-configuration.md](docs/native-configuration.md).

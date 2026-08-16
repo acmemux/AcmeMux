@@ -83,8 +83,9 @@ concurrency grace period, persist across ordinary service restart, and are
 revoked server-side by logout, password reset, or the local revocation command.
 Reset and revocation prevent requests that begin after the transaction commits
 from authenticating. They do not retroactively cancel a handler that was
-already authorized; future privileged mutation handlers must revalidate the
-authentication epoch immediately before committing their side effect.
+already authorized. Native configuration save and recovery handlers therefore
+retain the original session and CSRF pair and revalidate both immediately
+before the first filesystem activation or recovery finalization.
 Passwords and raw session tokens are not logged, rendered, returned in JSON,
 or stored in SQLite. The browser keeps password input local to the current form
 and does not place authentication material in URLs or Web Storage.
@@ -170,7 +171,64 @@ contents, certificate resource JSON, certificate or chain bytes, private keys,
 account material, child stderr, or inventory results. See
 `workspace-adoption.md` for layouts, permissions, states, and limits.
 
-## Failed sign-in and recovery
+## Native configuration editing trust
+
+Configuration inspection and preview require the same authenticated,
+same-origin browser boundary. Preview does not write a native file. Save
+accepts only stable logical field IDs and typed values declared by the exact
+runtime integration manifest; it never accepts a YAML selector, environment
+variable name, shell fragment, executable argument, or arbitrary native file
+path from a browser change.
+
+The browser receives an opaque base-revision token and, after a valid preview,
+an opaque reviewed-preview token. These are memory-keyed HMACs over the full
+runtime review, workspace review, source identities and contents, logical
+changes, and exact candidate replacements. They reveal no native digest or
+secret value and are invalid after service restart. They do not replace the
+administrator session, Origin, Host, or CSRF checks. Save reconstructs the
+candidate, compares the tokens, rereads all native sources, repeats no-follow
+path audits, re-verifies the runtime, and performs the immediate session and
+CSRF reauthorization before any active rename.
+
+Secret fields are write-only. Existing YAML or dotenv secrets are represented
+to the browser only as present, absent, or present but outside the curated
+contract. A preview reports a secret replacement or removal without returning
+the before or after value. Replacing a secret always prepares a replacement,
+even when the submitted bytes might match the stored bytes, so the service
+does not disclose equality. Configuration diagnostics contain stable codes,
+logical identities, and bounded native locations, never source values or raw
+parser errors.
+
+Every manifest-owned dotenv key is classified as secret. Other keys remain
+byte-for-byte authoritative but block managed execution. Secret values exist
+transiently in bounded request and candidate memory and in native files; they
+are not written to SQLite, journal phases, review summaries, errors, URLs, or
+responses. Memory clearing is best effort. Host swap, crash dumps, filesystem
+snapshots, and another process sharing the AcmeMux service UID are within the
+trusted-host boundary and must be protected operationally.
+
+Candidates are created beside their targets as service-owned, single-link
+regular files with mode `0600`, then synchronized and activated with
+same-directory `renameat2`. Source content and metadata, candidate paths,
+replacement parents, the working directory, storage, dotenv references, and
+webroots are checked around the commit guard. An edited active YAML or dotenv
+file is consequently owned by and readable only to the intended service
+identity. AcmeMux never changes ownership or permissions to make an unsafe
+existing workspace eligible for editing.
+
+SQLite can retain one secret-free interrupted-edit journal containing target
+paths and inode placement metadata. It contains no source bytes, content
+digest, field ID, summary, or secret. Recovery classifies placement but never
+replays staged bytes. A wholly unapplied edit can discard recognized stages;
+a wholly applied edit can be revalidated and finalized. Partial or ambiguous
+placement requires explicit host repair and confirmed adoption of the current
+active files. While that journal exists, the same coordinator and a journal
+check prevent runtime or workspace re-adoption from rebinding the recovery
+operation. A substituted or foreign staging entry is preserved and keeps
+recovery blocked. See `native-configuration.md` for the exact recovery states,
+operator procedure, resource limits, and filesystem assumptions.
+
+## Failed sign-in and administrator recovery
 
 Wrong passwords and an uninitialized service use the same credential failure
 response. Login work is bounded per client and globally, and concurrent

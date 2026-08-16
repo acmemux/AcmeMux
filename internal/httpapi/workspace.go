@@ -53,11 +53,13 @@ type RuntimePreparer func(context.Context) (inventory.PreparedExecutable, error)
 // WorkspaceDependencies are explicit so tests cannot accidentally inspect a
 // host workspace or execute a host binary.
 type WorkspaceDependencies struct {
-	Inspector      WorkspaceInspector
-	Selections     WorkspaceSelections
-	Inventory      WorkspaceInventory
-	PrepareRuntime RuntimePreparer
-	Now            func() time.Time
+	Inspector        WorkspaceInspector
+	Selections       WorkspaceSelections
+	Inventory        WorkspaceInventory
+	PrepareRuntime   RuntimePreparer
+	AcquireWorkspace WorkspaceLeaseFunc
+	EditJournal      NativeEditJournal
+	Now              func() time.Time
 }
 
 func (dependencies WorkspaceDependencies) validate() (WorkspaceDependencies, error) {
@@ -73,6 +75,12 @@ func (dependencies WorkspaceDependencies) validate() (WorkspaceDependencies, err
 	if dependencies.PrepareRuntime == nil {
 		return WorkspaceDependencies{}, errors.New("workspace runtime preparer is required")
 	}
+	if dependencies.AcquireWorkspace == nil {
+		return WorkspaceDependencies{}, errors.New("workspace coordinator is required")
+	}
+	if dependencies.EditJournal == nil {
+		return WorkspaceDependencies{}, errors.New("workspace native edit journal is required")
+	}
 	if dependencies.Now == nil {
 		dependencies.Now = time.Now
 	}
@@ -85,6 +93,8 @@ type workspaceEndpoints struct {
 	selections     WorkspaceSelections
 	inventory      WorkspaceInventory
 	prepareRuntime RuntimePreparer
+	acquire        WorkspaceLeaseFunc
+	journal        NativeEditJournal
 	now            func() time.Time
 }
 
@@ -211,6 +221,8 @@ func newWorkspaceEndpoints(identityAPI *identityEndpoints, dependencies Workspac
 		selections:     validated.Selections,
 		inventory:      validated.Inventory,
 		prepareRuntime: validated.PrepareRuntime,
+		acquire:        validated.AcquireWorkspace,
+		journal:        validated.EditJournal,
 		now:            validated.Now,
 	}, nil
 }
@@ -225,6 +237,11 @@ func (endpoints *workspaceEndpoints) getWorkspace(response http.ResponseWriter, 
 	if _, ok := endpoints.authorize(response, request, false); !ok {
 		return
 	}
+	release, ok := acquireWorkspaceLease(response, request, endpoints.acquire, workspace.PurposeInventory)
+	if !ok {
+		return
+	}
+	defer func() { _ = release() }()
 	selection, err := endpoints.selections.Load(request.Context())
 	if errors.Is(err, workspace.ErrNoSelection) {
 		writeJSON(response, http.StatusOK, map[string]string{"state": "unadopted"})
@@ -373,6 +390,11 @@ func (endpoints *workspaceEndpoints) inspectWorkspace(response http.ResponseWrit
 	if !ok {
 		return
 	}
+	release, ok := acquireWorkspaceLease(response, request, endpoints.acquire, workspace.PurposeRead)
+	if !ok {
+		return
+	}
+	defer func() { _ = release() }()
 	prepared, err := endpoints.prepareRuntime(request.Context())
 	if err != nil || prepared == nil {
 		writeWorkspaceRuntimeError(response, err)
@@ -410,6 +432,14 @@ func (endpoints *workspaceEndpoints) adoptWorkspace(response http.ResponseWriter
 	}
 	payload, ok := readWorkspaceRequest(response, request, true)
 	if !ok {
+		return
+	}
+	release, ok := acquireWorkspaceLease(response, request, endpoints.acquire, workspace.PurposeInventory)
+	if !ok {
+		return
+	}
+	defer func() { _ = release() }()
+	if !requireClearNativeEditJournal(response, request, endpoints.journal) {
 		return
 	}
 	prepared, err := endpoints.prepareRuntime(request.Context())

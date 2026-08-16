@@ -46,6 +46,10 @@ function safeRequestMessage(error: unknown): string {
   switch (error.code) {
     case "runtime_changed":
       return "The executable changed after review. Inspect it again before adoption.";
+    case "recovery_required":
+      return "Native configuration recovery is required. Reconcile the interrupted edit before inspecting or adopting an executable.";
+    case "service_busy":
+      return "Another native workspace action is in progress. Check the runtime again after it finishes.";
     case "invalid_request":
       return "AcmeMux rejected the runtime request. Review the host path and try again.";
     case "service_unavailable":
