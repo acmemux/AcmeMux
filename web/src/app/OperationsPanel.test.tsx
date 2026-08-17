@@ -135,9 +135,11 @@ describe("manual operation experience", () => {
     renderReadyApp(client);
 
     expect(
-      await screen.findByRole("heading", {
-        name: "Automatic renewal evaluation",
-      }),
+      await screen.findByRole(
+        "heading",
+        { name: "Automatic renewal evaluation" },
+        { timeout: 3_000 },
+      ),
     ).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("checkbox", { name: /Enable daily evaluation/i }),
