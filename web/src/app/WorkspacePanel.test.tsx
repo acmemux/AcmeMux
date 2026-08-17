@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { vi } from "vitest";
 import type { ComponentProps } from "react";
@@ -1297,7 +1298,13 @@ describe("workspace adoption", () => {
       screen.getByText("/srv/lego/data/certificates/gateway.home.example.crt"),
     ).toBeInTheDocument();
     expect(screen.getByText("uid 991 / gid 991 / 0640")).toBeInTheDocument();
-    expect(screen.getByText(/Mar 31, 2030.*UTC/)).toBeInTheDocument();
+    const certificateCard = screen
+      .getByRole("heading", { name: "gateway.home.example" })
+      .closest("article");
+    expect(certificateCard).not.toBeNull();
+    expect(
+      within(certificateCard!).getByText(/^Exact UTC: Mar 31, 2030.*UTC$/),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/BEGIN CERTIFICATE/)).toBeNull();
     expect(screen.queryByText(/PRIVATE KEY/)).toBeNull();
   });
