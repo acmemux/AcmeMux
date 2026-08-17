@@ -196,6 +196,33 @@ test("preview server returns correct not-found and manifest responses", async ({
   expect(malformedPath.status()).toBe(400);
 });
 
+test("public contact links use only approved role addresses", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(
+    page.locator('footer a[href^="mailto:contact@certleap.net"]'),
+  ).toHaveText("Contact");
+
+  await page.goto("/contribute/");
+  await expect(
+    page.locator('main a[href^="mailto:contact@certleap.net"]'),
+  ).toHaveText("contact@certleap.net");
+
+  await page.goto("/sponsor/");
+  await expect(
+    page.locator('main a[href^="mailto:sponsorship@certleap.net"]'),
+  ).toHaveCount(2);
+  await expect(page.locator('a[href*="sgurden@"]')).toHaveCount(0);
+
+  await page.goto("/security/");
+  await expect(
+    page.locator(
+      'main a[href="https://github.com/acmemux/AcmeMux/security/advisories/new"]',
+    ),
+  ).toBeVisible();
+});
+
 test("live verifier proves the exact local preview package", () => {
   const output = execFileSync(
     process.execPath,

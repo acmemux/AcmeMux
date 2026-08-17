@@ -15,6 +15,14 @@ const outputDirectory = join(applicationDirectory, "site/dist");
 
 const failures = [];
 const fail = (message) => failures.push(message);
+const publicContactEmails = new Set([
+  "contact@certleap.net",
+  "sponsorship@certleap.net",
+]);
+const publicContactLinks = new Set([
+  "mailto:contact@certleap.net?subject=AcmeMux%20inquiry",
+  "mailto:sponsorship@certleap.net?subject=AcmeMux%20sponsorship",
+]);
 
 function pageOutput(page) {
   if (page.route === "/") return "index.html";
@@ -146,6 +154,12 @@ for (const page of pages) {
       if (!types.includes("Organization") || !types.includes("WebSite")) {
         fail(`${page.route}: JSON-LD lacks Organization or WebSite`);
       }
+      const organization = value["@graph"].find(
+        (entry) => entry["@type"] === "Organization",
+      );
+      if (organization?.email !== "contact@certleap.net") {
+        fail(`${page.route}: JSON-LD lacks the approved general contact`);
+      }
       if (
         page.route !== "/" &&
         page.indexable !== false &&
@@ -190,6 +204,10 @@ for (const page of pages) {
     if (url.origin !== "https://acmemux.com") {
       if (element.tagName !== "A") {
         fail(`${page.route}: external asset is not allowed: ${value}`);
+      } else if (url.protocol === "mailto:") {
+        if (!publicContactLinks.has(url.href)) {
+          fail(`${page.route}: email link is outside the public allowlist`);
+        }
       } else if (url.protocol !== "https:") {
         fail(`${page.route}: external URL is not HTTPS: ${value}`);
       }
@@ -297,7 +315,6 @@ const packageText = (
   )
 ).join("\n");
 for (const [pattern, message] of [
-  [/@certleap\.net/i, "legacy CertLeap email"],
   [/sgurden@/i, "legacy personal email"],
   [/signed release artifacts?/i, "unsupported signed release claim"],
   [
@@ -315,6 +332,21 @@ for (const [pattern, message] of [
   [/\/(?:api\/v1|admin\/api)\b/i, "private administration API path"],
 ]) {
   if (pattern.test(packageText)) fail(`built package contains ${message}`);
+}
+const observedContactEmails = new Set(
+  [...packageText.matchAll(/\b[A-Z0-9._%+-]+@certleap\.net\b/gi)].map((match) =>
+    match[0].toLowerCase(),
+  ),
+);
+for (const email of observedContactEmails) {
+  if (!publicContactEmails.has(email)) {
+    fail(`built package contains unapproved CertLeap email ${email}`);
+  }
+}
+for (const email of publicContactEmails) {
+  if (!observedContactEmails.has(email)) {
+    fail(`built package is missing approved public contact ${email}`);
+  }
 }
 if (!packageText.includes("Current foundation - pre-release"))
   fail("current pre-release state label is missing");

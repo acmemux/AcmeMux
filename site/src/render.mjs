@@ -11,6 +11,7 @@ const organization = {
   "@type": "Organization",
   description:
     "Open-source self-hosted certificate operations growing toward lifecycle control.",
+  email: "contact@certleap.net",
   logo: "https://acmemux.com/favicon.svg",
   name: "AcmeMux",
   sameAs: ["https://github.com/acmemux"],
@@ -48,7 +49,7 @@ function footer() {
     <div class="shell footer-grid">
       <div class="footer-brand"><a class="brand" href="/">${brandMark()}<span>AcmeMux</span></a><p>Self-hosted certificate operations, built outward from a verified upstream lego foundation.</p></div>
       <div><strong>Product</strong><a href="/product/">Current product</a><a href="/roadmap/">Direction</a><a href="/providers/">Coverage</a><a href="/certificate-status/">Live proof</a></div>
-      <div><strong>Project</strong><a href="https://github.com/acmemux/AcmeMux">Source</a><a href="/contribute/">Contribute</a><a href="/sponsor/">Sponsor</a><a href="/privacy/">Privacy</a></div>
+      <div><strong>Project</strong><a href="https://github.com/acmemux/AcmeMux">Source</a><a href="/contribute/">Contribute</a><a href="/sponsor/">Sponsor</a><a href="mailto:contact@certleap.net?subject=AcmeMux%20inquiry">Contact</a><a href="/privacy/">Privacy</a></div>
       <div><strong>Operate safely</strong><a href="/security/">Security model</a><a href="https://github.com/acmemux/AcmeMux/security/policy">Report privately</a><a href="https://github.com/acmemux/AcmeMux/discussions">Discussions</a><a href="/sitemap.xml">Sitemap</a></div>
     </div>
     <div class="shell footer-floor"><span>Apache-2.0 open source. No product or website telemetry.</span><span>acmemux.com</span></div>
