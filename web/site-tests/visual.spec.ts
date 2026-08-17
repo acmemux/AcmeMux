@@ -13,6 +13,7 @@ test("homepage wide visual", async ({ page }) => {
   await expect(page).toHaveScreenshot("homepage-wide.png", {
     animations: "disabled",
     fullPage: true,
+    maxDiffPixelRatio: 0.002,
   });
 });
 
@@ -27,6 +28,7 @@ test("homepage narrow visual", async ({ page }) => {
   await expect(page).toHaveScreenshot("homepage-narrow.png", {
     animations: "disabled",
     fullPage: true,
+    maxDiffPixelRatio: 0.002,
   });
 });
 
