@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
@@ -152,9 +154,16 @@ test("reduced motion preserves navigation and dock interaction", async ({
 test("preview server returns correct not-found and manifest responses", async ({
   request,
 }) => {
+  const explicitNotFound = await request.get("/404.html");
+  expect(explicitNotFound.status()).toBe(404);
+  expect(await explicitNotFound.text()).toContain("noindex,nofollow");
+
   const missing = await request.get("/definitely-not-a-real-route");
   expect(missing.status()).toBe(404);
   expect(await missing.text()).toContain("noindex,nofollow");
+  const missingHead = await request.head("/definitely-not-a-real-route");
+  expect(missingHead.status()).toBe(404);
+  expect((await missingHead.body()).length).toBe(0);
 
   const manifest = await request.get("/site.webmanifest");
   expect(manifest.status()).toBe(200);
@@ -185,4 +194,19 @@ test("preview server returns correct not-found and manifest responses", async ({
 
   const malformedPath = await request.get("/%E0%A4%A");
   expect(malformedPath.status()).toBe(400);
+});
+
+test("live verifier proves the exact local preview package", () => {
+  const output = execFileSync(
+    process.execPath,
+    [
+      "tools/site-live-verify.mjs",
+      "--origin",
+      "http://127.0.0.1:4174",
+      "--package-only",
+    ],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  expect(output).toContain("Verified deployed site package (25 files");
+  expect(output).toContain("BUILD.json sha256");
 });

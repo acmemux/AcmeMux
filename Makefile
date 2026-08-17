@@ -7,7 +7,7 @@ GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
 export GOMODCACHE := $(CURDIR)/.cache/go-mod
 
-.PHONY: bootstrap browser-install build catalog distribution format-check lint run site-build site-static-check site-verify site-visual-update test test-accessibility test-broker test-browser test-compatibility test-configuration test-distribution test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-reporting test-runtime test-scheduler test-site test-systemd test-upgrade test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog distribution format-check lint run site-build site-live-verify site-static-check site-verify site-visual-update test test-accessibility test-broker test-browser test-compatibility test-configuration test-distribution test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-reporting test-runtime test-scheduler test-site test-systemd test-upgrade test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -133,6 +133,11 @@ site-build: toolchain-check
 
 site-static-check: site-build
 	cd web && npm run site:static
+	cd web && npm run test:site:live:unit
+
+site-live-verify: site-verify
+	cd web && npm run site:live
+	cd web && npm run test:site:live
 
 test-site: site-build
 	cd web && npm run test:site

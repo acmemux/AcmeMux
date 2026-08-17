@@ -146,7 +146,7 @@ const server = createServer(async (request, response) => {
   try {
     const details = await stat(path);
     if (!details.isFile()) throw new Error("not a file");
-    response.writeHead(200, {
+    response.writeHead(url.pathname === "/404.html" ? 404 : 200, {
       "Content-Type": types.get(extname(path)) ?? "application/octet-stream",
     });
     if (request.method === "HEAD") response.end();
@@ -154,7 +154,8 @@ const server = createServer(async (request, response) => {
   } catch {
     const notFound = join(outputDirectory, "404.html");
     response.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
-    createReadStream(notFound).pipe(response);
+    if (request.method === "HEAD") response.end();
+    else createReadStream(notFound).pipe(response);
   }
 });
 

@@ -13,7 +13,10 @@
     "vite.config.ts",
     "playwright.config.ts",
     "playwright.site.config.ts",
+    "playwright.site-live.config.ts",
+    "playwright.site-live-local.config.ts",
     "tests",
-    "site-tests"
+    "site-tests",
+    "site-live-tests"
   ]
 }

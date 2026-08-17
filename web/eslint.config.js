@@ -16,6 +16,7 @@ export default tseslint.config(
     files: [
       "tests/**/*.ts",
       "site-tests/**/*.ts",
+      "site-live-tests/**/*.ts",
       "tools/**/*.mjs",
       "*.config.ts",
     ],
