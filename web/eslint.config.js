@@ -13,7 +13,12 @@ export default tseslint.config(
     languageOptions: { globals: globals.browser },
   },
   {
-    files: ["tests/**/*.ts", "*.config.ts"],
+    files: [
+      "tests/**/*.ts",
+      "site-tests/**/*.ts",
+      "tools/**/*.mjs",
+      "*.config.ts",
+    ],
     languageOptions: { globals: globals.node },
   },
 );

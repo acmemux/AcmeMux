@@ -1,12 +1,17 @@
 # AcmeMux
 
-AcmeMux is a self-hosted graphical control plane for
-[lego](https://go-acme.github.io/lego/) ACME certificate operations. It gives
-one administrator a constrained web interface for configuring supported ACME
-certificate authorities and challenge providers, running issuance and renewal
-operations, scheduling daily evaluation, and inspecting certificate health.
-Lego remains the ACME client and continues to own its native workspace,
-accounts, certificates, and private keys.
+AcmeMux is an open-source, self-hosted graphical control plane for one
+qualified upstream [lego](https://go-acme.github.io/lego/) runtime and one
+native workspace. The current pre-release foundation gives one administrator
+typed configuration, constrained issuance and renewal evaluation, one durable
+daily schedule, certificate health, and a bounded redacted result. Lego remains
+the ACME client and owns its native accounts, certificates, and private keys.
+
+The destination is a broader certificate lifecycle control plane for
+discovery, public and private issuance, deployment, policy, team access,
+integrations, audit evidence, and recovery. Those capabilities will arrive only
+as separately accepted and verified slices; they are direction, not current
+support.
 
 [Website](https://acmemux.com) | [Live dogfood](https://acmemux.com/certificate-status/) | [Documentation](docs/installation.md) | [Roadmap](https://acmemux.com/roadmap/) | [Discussions](https://github.com/acmemux/AcmeMux/discussions) | [Sponsor](https://acmemux.com/sponsor/)
 
@@ -81,8 +86,8 @@ operator responsibilities. Read the full [security model](docs/security.md)
 before installation.
 
 Security vulnerabilities should be reported through the
-[private security process](https://github.com/acmemux/.github/security/policy),
-not in a public issue or Discussion.
+[GitHub private vulnerability process](https://github.com/acmemux/AcmeMux/security/advisories/new),
+not by email or in a public issue or Discussion.
 
 ## Documentation
 
@@ -100,16 +105,21 @@ not in a public issue or Discussion.
 ## Dogfooding and product direction
 
 The production website uses an internal AcmeMux instance, upstream lego,
-Let's Encrypt DNS-01, and a narrowly scoped Route 53 identity to evaluate,
-issue, and deploy its own public TLS certificate. The
+Let's Encrypt DNS-01, and a narrowly scoped Route 53 identity. AcmeMux
+evaluates the native workspace, and upstream lego performs issuance; separate
+least-privilege automation validates and activates the certificate served by
+acmemux.com. The
 [live status page](https://acmemux.com/certificate-status/) publishes the dates,
 fingerprint, and next expected replacement so visitors can verify the result.
 
 The current one-workspace control plane is the trusted foundation, not the end
 goal. The [public roadmap](https://acmemux.com/roadmap/) describes the path
-toward self-hosted certificate lifecycle management: discovery, inventory,
-public and private issuance, deployment, policy, alerts, access control, audit,
-and recoverable automation.
+toward self-hosted certificate lifecycle management: discovery and unified
+inventory; public, private, and external issuance; renewal and constrained
+deployment; ownership, policy, templates, and approvals; team identity and
+access; alerts, APIs, and integrations; audit and reporting evidence; and
+backup, recovery, and resilience. Roadmap horizons do not promise a date,
+order, support level, or architecture.
 
 ## Contributing, support, and sponsorship
 
@@ -117,7 +127,9 @@ and recoverable automation.
 - Use [Discussions](https://github.com/acmemux/AcmeMux/discussions) for questions, workflows, and roadmap proposals.
 - Use [Issues](https://github.com/acmemux/AcmeMux/issues) for reproducible defects with redacted diagnostics.
 - Read the [support policy](https://github.com/acmemux/.github/blob/main/SUPPORT.md); free support has no guaranteed response time.
-- Review [sponsorship tiers](https://acmemux.com/sponsor/) for recognition, company benefits, and fast-track partnership.
+- Review [sponsorship](https://acmemux.com/sponsor/). Support helps
+  maintenance and qualified roadmap work; it does not provide an SLA or
+  guarantee feature delivery.
 
 ## License
 

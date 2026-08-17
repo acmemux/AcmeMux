@@ -7,7 +7,7 @@ GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
 export GOMODCACHE := $(CURDIR)/.cache/go-mod
 
-.PHONY: bootstrap browser-install build catalog distribution format-check lint run test test-accessibility test-broker test-browser test-compatibility test-configuration test-distribution test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-reporting test-runtime test-scheduler test-systemd test-upgrade test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog distribution format-check lint run site-build site-static-check site-verify site-visual-update test test-accessibility test-broker test-browser test-compatibility test-configuration test-distribution test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-reporting test-runtime test-scheduler test-site test-systemd test-upgrade test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -25,6 +25,7 @@ toolchain-check:
 format-check:
 	@test -z "$$(gofmt -l $$(find cmd internal -name '*.go' -type f))" || (gofmt -l $$(find cmd internal -name '*.go' -type f) && exit 1)
 	cd web && npm run format:check
+	cd web && npx prettier --check ../site/scripts ../site/src
 
 lint:
 	go vet $(GO_PACKAGES)
@@ -127,6 +128,25 @@ test-visual:
 test-visual-update:
 	cd web && npm run test:visual:update
 
+site-build: toolchain-check
+	node site/scripts/build.mjs
+
+site-static-check: site-build
+	cd web && npm run site:static
+
+test-site: site-build
+	cd web && npm run test:site
+
+site-visual-update: site-build
+	cd web && npm run test:site:visual:update
+
+site-verify: site-static-check
+	@first="$$(sha256sum site/dist/BUILD.json | awk '{ print $$1 }')"; \
+		$(MAKE) --no-print-directory site-build >/dev/null; \
+		second="$$(sha256sum site/dist/BUILD.json | awk '{ print $$1 }')"; \
+		test "$$first" = "$$second" || (echo "public site build is not reproducible" && exit 1)
+	cd web && npm run test:site
+
 catalog:
 	cd web && npm run catalog
 
@@ -157,4 +177,4 @@ run: web-build
 	@test -n "$(ACMEMUX_PUBLIC_ORIGIN)" || (echo "ACMEMUX_PUBLIC_ORIGIN must name the HTTPS browser origin" && exit 1)
 	go run ./cmd/acmemux serve --state-dir ./var
 
-verify: toolchain-check format-check lint test test-race vuln web-verify test-browser build test-distribution test-upgrade test-systemd
+verify: toolchain-check format-check lint test test-race vuln web-verify test-browser site-verify build test-distribution test-upgrade test-systemd

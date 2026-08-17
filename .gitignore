@@ -9,4 +9,6 @@
 /web/dist/
 /web/playwright-report/
 /web/test-results/
+/site/dist/
+/site/.dist-build/
 *.tsbuildinfo
