@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
+	"github.com/acmemux/AcmeMux/internal/integrations"
 	"go.yaml.in/yaml/v3"
 )
 

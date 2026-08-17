@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/acmemux/AcmeMux/internal/state"
 )
 
 func TestStorePersistsOneScheduleAndCoalescesMissedDates(t *testing.T) {

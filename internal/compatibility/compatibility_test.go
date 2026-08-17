@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
+	acmeruntime "github.com/acmemux/AcmeMux/internal/runtime"
 )
 
 func TestExactManifestsValidateAndAreDefensiveCopies(t *testing.T) {

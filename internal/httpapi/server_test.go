@@ -10,7 +10,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/identity"
+	"github.com/acmemux/AcmeMux/internal/identity"
 )
 
 const testPublicOrigin = "https://acmemux.example"

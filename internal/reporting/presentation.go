@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
+	"github.com/acmemux/AcmeMux/internal/jobs"
 )
 
 const maximumRenderedOutput = 256 << 10

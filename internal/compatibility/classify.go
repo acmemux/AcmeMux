@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
+	acmeruntime "github.com/acmemux/AcmeMux/internal/runtime"
 )
 
 // Classify applies the exact source-backed allowlist to an already audited

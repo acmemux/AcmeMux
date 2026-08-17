@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
-	"github.com/sgurden-certleap/AcmeMux/internal/operation"
-	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/acmemux/AcmeMux/internal/jobs"
+	"github.com/acmemux/AcmeMux/internal/operation"
+	"github.com/acmemux/AcmeMux/internal/state"
 )
 
 type fakeClock struct {

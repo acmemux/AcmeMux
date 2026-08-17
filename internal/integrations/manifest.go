@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
+	"github.com/acmemux/AcmeMux/internal/compatibility"
 )
 
 // SelectorSegment is an immutable server-side YAML selector component.

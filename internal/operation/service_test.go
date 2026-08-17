@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/broker"
-	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
-	"github.com/sgurden-certleap/AcmeMux/internal/configuration"
-	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
-	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
-	"github.com/sgurden-certleap/AcmeMux/internal/state"
-	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
+	"github.com/acmemux/AcmeMux/internal/broker"
+	"github.com/acmemux/AcmeMux/internal/compatibility"
+	"github.com/acmemux/AcmeMux/internal/configuration"
+	"github.com/acmemux/AcmeMux/internal/inventory"
+	"github.com/acmemux/AcmeMux/internal/jobs"
+	"github.com/acmemux/AcmeMux/internal/state"
+	"github.com/acmemux/AcmeMux/internal/workspace"
 )
 
 type fakeConfiguration struct {

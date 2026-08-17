@@ -13,14 +13,14 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
-	"github.com/sgurden-certleap/AcmeMux/internal/configuration"
-	"github.com/sgurden-certleap/AcmeMux/internal/identity"
-	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
-	"github.com/sgurden-certleap/AcmeMux/internal/operation"
-	"github.com/sgurden-certleap/AcmeMux/internal/scheduler"
-	"github.com/sgurden-certleap/AcmeMux/internal/state"
-	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
+	"github.com/acmemux/AcmeMux/internal/compatibility"
+	"github.com/acmemux/AcmeMux/internal/configuration"
+	"github.com/acmemux/AcmeMux/internal/identity"
+	"github.com/acmemux/AcmeMux/internal/jobs"
+	"github.com/acmemux/AcmeMux/internal/operation"
+	"github.com/acmemux/AcmeMux/internal/scheduler"
+	"github.com/acmemux/AcmeMux/internal/state"
+	"github.com/acmemux/AcmeMux/internal/workspace"
 )
 
 var operationReviewToken = base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("r", 32)))

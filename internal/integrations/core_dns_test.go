@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
+	"github.com/acmemux/AcmeMux/internal/compatibility"
 )
 
 func TestCoreDNSManifestBindsExactProvidersAndRuntimeIdentities(t *testing.T) {

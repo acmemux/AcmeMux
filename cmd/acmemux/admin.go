@@ -13,8 +13,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/identity"
-	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/acmemux/AcmeMux/internal/identity"
+	"github.com/acmemux/AcmeMux/internal/state"
 )
 
 const administratorCommandTimeout = 30 * time.Second

@@ -28,7 +28,7 @@ format-check:
 
 lint:
 	go vet $(GO_PACKAGES)
-	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) $(GO_PACKAGES)
+	GOTOOLCHAIN=$(GO_VERSION) go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) $(GO_PACKAGES)
 
 test:
 	go test $(GO_PACKAGES)
@@ -37,7 +37,7 @@ test-race:
 	go test -race $(GO_PACKAGES)
 
 vuln:
-	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) $(GO_PACKAGES)
+	GOTOOLCHAIN=$(GO_VERSION) go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) $(GO_PACKAGES)
 	cd web && npm audit --audit-level=low
 
 web-build:

@@ -15,13 +15,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/identity"
-	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
-	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
-	"github.com/sgurden-certleap/AcmeMux/internal/operation"
-	"github.com/sgurden-certleap/AcmeMux/internal/reporting"
-	"github.com/sgurden-certleap/AcmeMux/internal/scheduler"
-	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
+	"github.com/acmemux/AcmeMux/internal/identity"
+	"github.com/acmemux/AcmeMux/internal/integrations"
+	"github.com/acmemux/AcmeMux/internal/jobs"
+	"github.com/acmemux/AcmeMux/internal/operation"
+	"github.com/acmemux/AcmeMux/internal/reporting"
+	"github.com/acmemux/AcmeMux/internal/scheduler"
+	"github.com/acmemux/AcmeMux/internal/workspace"
 )
 
 const maximumOperationRequestBytes = 4096

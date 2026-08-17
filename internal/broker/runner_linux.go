@@ -18,7 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/redaction"
+	"github.com/acmemux/AcmeMux/internal/redaction"
 )
 
 const (

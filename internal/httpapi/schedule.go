@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/scheduler"
+	"github.com/acmemux/AcmeMux/internal/scheduler"
 )
 
 var localTimePattern = regexp.MustCompile(`^(?:[01][0-9]|2[0-3]):[0-5][0-9]$`)

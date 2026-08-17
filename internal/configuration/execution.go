@@ -9,10 +9,10 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
-	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
-	"github.com/sgurden-certleap/AcmeMux/internal/nativeconfig"
-	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
+	"github.com/acmemux/AcmeMux/internal/compatibility"
+	"github.com/acmemux/AcmeMux/internal/integrations"
+	"github.com/acmemux/AcmeMux/internal/nativeconfig"
+	"github.com/acmemux/AcmeMux/internal/workspace"
 )
 
 const maximumExecutionCertificates = 64

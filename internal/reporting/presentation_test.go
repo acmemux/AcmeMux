@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
+	"github.com/acmemux/AcmeMux/internal/jobs"
 )
 
 func TestPresentStateCoversEveryTerminalState(t *testing.T) {

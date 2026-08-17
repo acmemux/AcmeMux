@@ -5,9 +5,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/acmemux/AcmeMux/internal/compatibility"
+	"github.com/acmemux/AcmeMux/internal/integrations"
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
-	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
 	"go.yaml.in/yaml/v3"
 )
 

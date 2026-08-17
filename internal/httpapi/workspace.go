@@ -14,11 +14,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/identity"
-	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
-	"github.com/sgurden-certleap/AcmeMux/internal/reporting"
-	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
-	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
+	"github.com/acmemux/AcmeMux/internal/identity"
+	"github.com/acmemux/AcmeMux/internal/inventory"
+	"github.com/acmemux/AcmeMux/internal/reporting"
+	acmeruntime "github.com/acmemux/AcmeMux/internal/runtime"
+	"github.com/acmemux/AcmeMux/internal/workspace"
 )
 
 const (

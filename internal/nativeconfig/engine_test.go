@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
-	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
+	"github.com/acmemux/AcmeMux/internal/compatibility"
+	"github.com/acmemux/AcmeMux/internal/integrations"
 )
 
 const validNativeConfiguration = `# native lego configuration

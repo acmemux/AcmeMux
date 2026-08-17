@@ -6,7 +6,7 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
+	"github.com/acmemux/AcmeMux/internal/integrations"
 )
 
 // Limits bounds every input-derived allocation and diagnostic collection.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
+	"github.com/acmemux/AcmeMux/internal/workspace"
 )
 
 const coreDNSServiceTestConfiguration = `storage: .lego

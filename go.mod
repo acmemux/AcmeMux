@@ -1,4 +1,4 @@
-module github.com/sgurden-certleap/AcmeMux
+module github.com/acmemux/AcmeMux
 
 go 1.26.0
 

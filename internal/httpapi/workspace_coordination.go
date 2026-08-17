@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
+	"github.com/acmemux/AcmeMux/internal/workspace"
 )
 
 // WorkspaceLeaseFunc acquires the single native-workspace lease shared by

@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
+	"github.com/acmemux/AcmeMux/internal/inventory"
 )
 
 const ExpiringWindow = 30 * 24 * time.Hour

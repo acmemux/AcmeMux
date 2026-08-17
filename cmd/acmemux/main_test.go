@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
-	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
+	"github.com/acmemux/AcmeMux/internal/inventory"
+	acmeruntime "github.com/acmemux/AcmeMux/internal/runtime"
 )
 
 func TestHTTPWriteBudgetCanReturnRuntimeInspectionTimeout(t *testing.T) {

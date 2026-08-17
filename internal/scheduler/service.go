@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
-	"github.com/sgurden-certleap/AcmeMux/internal/operation"
+	"github.com/acmemux/AcmeMux/internal/jobs"
+	"github.com/acmemux/AcmeMux/internal/operation"
 )
 
 const (

@@ -5,15 +5,15 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
-	"github.com/sgurden-certleap/AcmeMux/internal/configuration"
-	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
-	"github.com/sgurden-certleap/AcmeMux/internal/jobs"
-	"github.com/sgurden-certleap/AcmeMux/internal/nativeconfig"
-	"github.com/sgurden-certleap/AcmeMux/internal/operation"
-	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
-	"github.com/sgurden-certleap/AcmeMux/internal/scheduler"
-	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
+	"github.com/acmemux/AcmeMux/internal/compatibility"
+	"github.com/acmemux/AcmeMux/internal/configuration"
+	"github.com/acmemux/AcmeMux/internal/inventory"
+	"github.com/acmemux/AcmeMux/internal/jobs"
+	"github.com/acmemux/AcmeMux/internal/nativeconfig"
+	"github.com/acmemux/AcmeMux/internal/operation"
+	acmeruntime "github.com/acmemux/AcmeMux/internal/runtime"
+	"github.com/acmemux/AcmeMux/internal/scheduler"
+	"github.com/acmemux/AcmeMux/internal/workspace"
 )
 
 type inertRuntimeInspector struct{}

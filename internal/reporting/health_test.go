@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/inventory"
+	"github.com/acmemux/AcmeMux/internal/inventory"
 )
 
 func TestClassifyHealthBoundaries(t *testing.T) {

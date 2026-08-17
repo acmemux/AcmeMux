@@ -1,20 +1,63 @@
 # AcmeMux
 
-AcmeMux is a graphical control plane for one existing [lego](https://go-acme.github.io/lego/) ACME client and one native lego workspace. It helps a self-hosted administrator configure supported certificate authorities and challenge providers, run certificate operations, schedule daily renewal evaluation, and inspect safe results without replacing lego or copying its certificates and private keys into another store.
+AcmeMux is a self-hosted graphical control plane for
+[lego](https://go-acme.github.io/lego/) ACME certificate operations. It gives
+one administrator a constrained web interface for configuring supported ACME
+certificate authorities and challenge providers, running issuance and renewal
+operations, scheduling daily evaluation, and inspecting certificate health.
+Lego remains the ACME client and continues to own its native workspace,
+accounts, certificates, and private keys.
+
+[Website](https://acmemux.com) | [Live dogfood](https://acmemux.com/certificate-status/) | [Documentation](docs/installation.md) | [Roadmap](https://acmemux.com/roadmap/) | [Discussions](https://github.com/acmemux/AcmeMux/discussions) | [Sponsor](https://acmemux.com/sponsor/)
+
+## Why AcmeMux
+
+Lego is a capable command-line ACME client with broad provider support. AcmeMux
+adds a deliberately narrow operational layer for administrators who want to:
+
+- review supported configuration through typed forms instead of raw YAML;
+- run constrained certificate operations without exposing an arbitrary shell;
+- persist one daily renewal-evaluation schedule across restarts;
+- inspect current certificate health and one bounded, redacted result; and
+- keep the existing native lego workspace as the source of truth.
+
+AcmeMux does not reimplement ACME, copy private keys into a second store, or
+claim support merely because a provider is compiled into lego.
 
 ## Project status
 
-AcmeMux is pre-release software. The qualified deployment is a source build on Debian 13 amd64 under the supplied systemd service, using only the exact lego executables listed in [runtime compatibility](docs/runtime-compatibility.md). Passing on another Linux distribution or architecture does not imply support.
+AcmeMux is pre-release software. The qualified deployment is a source build on
+Debian 13 amd64 under the supplied systemd service, using only the exact lego
+executables listed in [runtime compatibility](docs/runtime-compatibility.md).
+Passing on another Linux distribution or architecture does not imply support.
 
-AcmeMux does not publish Debian, RPM, package-repository, or container artifacts. Operating-system packages remain roadmap work and can be prioritized in response to operator demand.
+There are no Debian, RPM, package-repository, or container artifacts yet. Do
+not treat the current branch as a stable release or expose AcmeMux directly to
+the internet. It must listen on loopback behind an HTTPS reverse proxy.
 
-Do not treat the current branch as a stable release or expose it directly to the internet. AcmeMux must listen on loopback behind an HTTPS reverse proxy.
+## Current supported scope
 
-## Install
+| Area | Supported now |
+| --- | --- |
+| Operator model | One administrator, one lego executable, one native workspace |
+| Certificate authorities | Let's Encrypt, ZeroSSL, Google Trust Services, SSL.com, and the fixed GoDaddy ACME service |
+| HTTP-01 | Unprivileged listener or existing webroot |
+| DNS-01 | Azure DNS, Cloudflare, DigitalOcean, DuckDNS, and Amazon Route 53 |
+| Operations | Manual whole-workspace certificate evaluation and one persistent daily automatic evaluation schedule |
+| Reporting | Current native certificate health and one bounded latest redacted result |
 
-The source installation requires Go 1.26.6, Node.js 20.19.2, npm 9.2.0, GNU Make, and a supported lego executable. Follow the [installation guide](docs/installation.md) to produce and verify the single executable, install the hardened systemd service, configure HTTPS, and run it under a dedicated or compatible existing non-root account.
+Unsupported native fields and integrations are preserved, but they block
+AcmeMux-managed edits and operations. The current product does not provide raw
+YAML editing, arbitrary commands, multiple users or workspaces, certificate
+deployment, notifications, or long-term operation history.
 
-## First setup
+## Install and first setup
+
+The source installation requires Go 1.26.6, Node.js 20.19.2, npm 9.2.0, GNU
+Make, and a supported lego executable. Follow the
+[installation guide](docs/installation.md) to build and verify the single
+executable, install the hardened systemd service, configure HTTPS, and run it
+under a dedicated or compatible existing non-root account.
 
 After installation:
 
@@ -22,25 +65,24 @@ After installation:
 2. Sign in through the configured HTTPS address.
 3. Inspect and adopt a supported lego executable.
 4. Adopt an existing native workspace or create a supported configuration.
-5. Review the certificate inventory and configuration before starting an operation.
-6. Enable the daily automatic schedule only after its time zone and next UTC evaluation are correct.
+5. Review certificate inventory and configuration before starting an operation.
+6. Enable daily automatic evaluation only after checking its time zone and next UTC evaluation.
 
-The browser does not download lego, repair host permissions, or move native workspace files. Those host prerequisites remain under the operator's control.
+The browser does not download lego, repair host permissions, or move native
+workspace files. Those host prerequisites remain under the operator's control.
 
-## Use AcmeMux
+## Security boundary
 
-AcmeMux supports one administrator, one lego executable, and one native workspace. Native YAML, credential files, ACME accounts, certificates, chains, private keys, archives, and renewal behavior remain owned by lego. AcmeMux provides reviewed forms and constrained operations around that workspace.
+AcmeMux is intended to run as a non-root service on the same trusted host as
+the lego workspace. Browser requests map to typed, reviewed operations. Host
+filesystem ownership, DNS credentials, ACME account keys, certificate private
+keys, reverse-proxy TLS, backups, and deployment into consuming services remain
+operator responsibilities. Read the full [security model](docs/security.md)
+before installation.
 
-The current product covers:
-
-- Let's Encrypt, ZeroSSL, Google Trust Services, SSL.com, and the fixed GoDaddy ACME service;
-- HTTP-01 through an unprivileged listener or an existing webroot;
-- DNS-01 through Azure DNS, Cloudflare, DigitalOcean, DuckDNS, and Amazon Route 53;
-- manual whole-workspace certificate evaluation; and
-- one persistent daily automatic evaluation schedule; and
-- current native certificate health with one bounded latest redacted result.
-
-Unsupported native fields and integrations are preserved but block AcmeMux-managed edits and operations. AcmeMux does not offer arbitrary commands, raw YAML editing, multiple users or workspaces, certificate deployment, notifications, or long-term operation history.
+Security vulnerabilities should be reported through the
+[private security process](https://github.com/acmemux/.github/security/policy),
+not in a public issue or Discussion.
 
 ## Documentation
 
@@ -55,6 +97,28 @@ Unsupported native fields and integrations are preserved but block AcmeMux-manag
 - [Automatic renewal evaluation](docs/automatic-renewal.md)
 - [Certificate health and latest reporting](docs/certificate-health-and-reporting.md)
 
-## Support
+## Dogfooding and product direction
 
-AcmeMux is currently maintained by one owner and does not yet publish a contribution or community-support process. Use the browser's reported state and the troubleshooting sections in these guides before changing the native workspace. Security reporting and public issue-handling details will be published before the first stable release.
+The production website uses an internal AcmeMux instance, upstream lego,
+Let's Encrypt DNS-01, and a narrowly scoped Route 53 identity to evaluate,
+issue, and deploy its own public TLS certificate. The
+[live status page](https://acmemux.com/certificate-status/) publishes the dates,
+fingerprint, and next expected replacement so visitors can verify the result.
+
+The current one-workspace control plane is the trusted foundation, not the end
+goal. The [public roadmap](https://acmemux.com/roadmap/) describes the path
+toward self-hosted certificate lifecycle management: discovery, inventory,
+public and private issuance, deployment, policy, alerts, access control, audit,
+and recoverable automation.
+
+## Contributing, support, and sponsorship
+
+- Read the [contribution guide](https://github.com/acmemux/.github/blob/main/CONTRIBUTING.md) before a large change.
+- Use [Discussions](https://github.com/acmemux/AcmeMux/discussions) for questions, workflows, and roadmap proposals.
+- Use [Issues](https://github.com/acmemux/AcmeMux/issues) for reproducible defects with redacted diagnostics.
+- Read the [support policy](https://github.com/acmemux/.github/blob/main/SUPPORT.md); free support has no guaranteed response time.
+- Review [sponsorship tiers](https://acmemux.com/sponsor/) for recognition, company benefits, and fast-track partnership.
+
+## License
+
+AcmeMux is licensed under the [Apache License 2.0](LICENSE).

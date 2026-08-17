@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/acmemux/AcmeMux/internal/state"
 )
 
 var testEpoch = time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
+	"github.com/acmemux/AcmeMux/internal/compatibility"
 )
 
 func TestCoreManifestExposesExactTask07FieldContract(t *testing.T) {

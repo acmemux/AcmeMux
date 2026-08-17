@@ -10,11 +10,11 @@ import (
 	"io"
 	"slices"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
-	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
-	"github.com/sgurden-certleap/AcmeMux/internal/nativeconfig"
-	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
-	"github.com/sgurden-certleap/AcmeMux/internal/workspace"
+	"github.com/acmemux/AcmeMux/internal/compatibility"
+	"github.com/acmemux/AcmeMux/internal/integrations"
+	"github.com/acmemux/AcmeMux/internal/nativeconfig"
+	acmeruntime "github.com/acmemux/AcmeMux/internal/runtime"
+	"github.com/acmemux/AcmeMux/internal/workspace"
 )
 
 var (

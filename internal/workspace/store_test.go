@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/acmemux/AcmeMux/internal/state"
 )
 
 func TestStoreRoundTripsReplacesAndClearsSingleton(t *testing.T) {

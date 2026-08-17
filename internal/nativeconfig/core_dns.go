@@ -5,7 +5,7 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/integrations"
+	"github.com/acmemux/AcmeMux/internal/integrations"
 )
 
 // WithCoreDNSCredentialValidation applies authentication-combination rules

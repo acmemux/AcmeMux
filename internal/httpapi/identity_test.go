@@ -12,8 +12,8 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/identity"
-	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/acmemux/AcmeMux/internal/identity"
+	"github.com/acmemux/AcmeMux/internal/state"
 )
 
 const (

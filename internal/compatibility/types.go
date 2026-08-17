@@ -3,7 +3,7 @@ package compatibility
 import (
 	"fmt"
 
-	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
+	acmeruntime "github.com/acmemux/AcmeMux/internal/runtime"
 )
 
 // ManifestID is the stable identifier of an exact compatibility manifest.

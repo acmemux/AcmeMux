@@ -3,7 +3,7 @@ package integrations
 import (
 	"sync"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/compatibility"
+	"github.com/acmemux/AcmeMux/internal/compatibility"
 )
 
 const (

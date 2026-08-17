@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/acmemux/AcmeMux/internal/state"
 )
 
 var testPasswordParameters = passwordParameters{

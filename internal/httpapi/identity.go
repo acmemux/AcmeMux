@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/identity"
+	"github.com/acmemux/AcmeMux/internal/identity"
 )
 
 // A 1024-byte accepted password can expand sixfold under JSON string escaping.

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/acmemux/AcmeMux/internal/state"
 )
 
 func TestBootstrapAuthenticateAndPersistOnlyVerifierAndTokenHashes(t *testing.T) {

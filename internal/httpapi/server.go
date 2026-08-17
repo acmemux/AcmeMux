@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/identity"
+	"github.com/acmemux/AcmeMux/internal/identity"
 )
 
 // Readiness is the application-state capability required by readiness probes.

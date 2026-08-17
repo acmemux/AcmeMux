@@ -14,10 +14,11 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
-	"github.com/sgurden-certleap/AcmeMux/internal/state"
+	"github.com/acmemux/AcmeMux/internal/state"
 )
 
 const sourceRevision = "2a58c3522708e4c7393a67be691bd0c3a16d8441"
@@ -139,7 +140,7 @@ func TestInspectRejectsProbeFailures(t *testing.T) {
 		{name: "malformed", mode: "malformed", timeout: time.Second, outputLimit: 4096, code: CodeMalformedVersion},
 		{name: "stdout oversized", mode: "stdout-oversized", timeout: time.Second, outputLimit: 64, code: CodeProbeOutputLimit},
 		{name: "stderr oversized", mode: "stderr-oversized", timeout: time.Second, outputLimit: 64, code: CodeProbeOutputLimit},
-		{name: "timeout", mode: "timeout", timeout: 30 * time.Millisecond, outputLimit: 4096, code: CodeProbeTimeout},
+		{name: "timeout", mode: "timeout", timeout: 250 * time.Millisecond, outputLimit: 4096, code: CodeProbeTimeout},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -622,7 +623,15 @@ func replaceProbeFixture(path, source string) error {
 		return err
 	}
 	defer input.Close()
-	output, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+	var output *os.File
+	deadline := time.Now().Add(time.Second)
+	for {
+		output, err = os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+		if err == nil || !errors.Is(err, syscall.ETXTBSY) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if err != nil {
 		return err
 	}

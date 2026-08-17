@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	acmeruntime "github.com/sgurden-certleap/AcmeMux/internal/runtime"
+	acmeruntime "github.com/acmemux/AcmeMux/internal/runtime"
 )
 
 var (
