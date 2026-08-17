@@ -38,8 +38,6 @@
   text-decoration: none;
   cursor: pointer;
   transition:
-    color var(--am-motion-fast) ease,
-    background-color var(--am-motion-fast) ease,
     border-color var(--am-motion-fast) ease,
     transform var(--am-motion-fast) ease;
 }
