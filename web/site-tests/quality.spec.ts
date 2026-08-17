@@ -203,6 +203,14 @@ test("public contact links use only approved role addresses", async ({
   await expect(
     page.locator('footer a[href^="mailto:contact@certleap.net"]'),
   ).toHaveText("Contact");
+  await expect(
+    page.locator(
+      'footer a[data-private-report][href="https://github.com/acmemux/AcmeMux/security/policy"]',
+    ),
+  ).toHaveText("Report privately");
+  await expect(
+    page.locator('footer a[data-private-report][href^="mailto:"]'),
+  ).toHaveCount(0);
 
   await page.goto("/contribute/");
   await expect(
@@ -215,12 +223,17 @@ test("public contact links use only approved role addresses", async ({
   ).toHaveCount(2);
   await expect(page.locator('a[href*="sgurden@"]')).toHaveCount(0);
 
-  await page.goto("/security/");
-  await expect(
-    page.locator(
-      'main a[href="https://github.com/acmemux/AcmeMux/security/advisories/new"]',
-    ),
-  ).toBeVisible();
+  for (const route of ["/security/", "/contribute/"]) {
+    await page.goto(route);
+    const disclosure = page.locator("main [data-private-disclosure]");
+    await expect(disclosure).toHaveCount(1);
+    await expect(
+      disclosure.locator(
+        'a[data-private-report][href="https://github.com/acmemux/AcmeMux/security/advisories/new"]',
+      ),
+    ).toHaveCount(1);
+    await expect(disclosure.locator('a[href^="mailto:"]')).toHaveCount(0);
+  }
 });
 
 test("live verifier proves the exact local preview package", () => {

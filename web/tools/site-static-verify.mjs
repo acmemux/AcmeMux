@@ -191,6 +191,50 @@ for (const page of pages) {
   if (!page.nav && currentLinks.length !== 0)
     fail(`${page.route}: must not inherit a current navigation link`);
 
+  const privateReportLinks = document.querySelectorAll(
+    "a[data-private-report]",
+  );
+  if (privateReportLinks.length === 0) {
+    fail(`${page.route}: private reporting route is missing`);
+  }
+  for (const link of privateReportLinks) {
+    if (
+      ![
+        "https://github.com/acmemux/AcmeMux/security/advisories/new",
+        "https://github.com/acmemux/AcmeMux/security/policy",
+      ].includes(link.getAttribute("href"))
+    ) {
+      fail(`${page.route}: private reporting route must remain on GitHub`);
+    }
+  }
+
+  const disclosureRegions = document.querySelectorAll(
+    "[data-private-disclosure]",
+  );
+  const expectedDisclosureRegions = ["/security/", "/contribute/"].includes(
+    page.route,
+  )
+    ? 1
+    : 0;
+  if (disclosureRegions.length !== expectedDisclosureRegions) {
+    fail(
+      `${page.route}: requires ${expectedDisclosureRegions} private disclosure region`,
+    );
+  }
+  for (const region of disclosureRegions) {
+    const reportLinks = region.querySelectorAll("a[data-private-report]");
+    if (
+      reportLinks.length !== 1 ||
+      reportLinks[0].getAttribute("href") !==
+        "https://github.com/acmemux/AcmeMux/security/advisories/new"
+    ) {
+      fail(`${page.route}: private disclosure route is not GitHub reporting`);
+    }
+    if (region.querySelector("a[href^='mailto:']")) {
+      fail(`${page.route}: private disclosure region must not use email`);
+    }
+  }
+
   for (const element of document.querySelectorAll(
     "a[href], img[src], script[src], link[rel='stylesheet'][href], link[rel='icon'][href], link[rel='manifest'][href]",
   )) {

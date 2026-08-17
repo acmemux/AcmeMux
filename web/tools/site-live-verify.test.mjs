@@ -3,14 +3,17 @@ import { createServer } from "node:http";
 import test from "node:test";
 
 import {
+  formatFailure,
   options,
   parseStatus,
+  prepareProductionPackage,
   readLimited,
   requestBytes,
   verifyCachePolicy,
   verifyCommonSecurity,
   verifyHtmlSecurity,
   verifyRedirect,
+  verifyReminderSameOrigin,
   verifyTlsMatch,
 } from "./site-live-verify.mjs";
 
@@ -73,6 +76,64 @@ test("origin options are fixed to production or loopback package checks", () => 
   );
 });
 
+test("production package preparation binds one clean unchanged revision", () => {
+  const revision = "a".repeat(40);
+  function runner({
+    states = ["", ""],
+    revisions = [revision, revision],
+    buildFails = false,
+  } = {}) {
+    let stateIndex = 0;
+    let revisionIndex = 0;
+    let builds = 0;
+    const run = (command, arguments_) => {
+      if (command === "git" && arguments_[0] === "status") {
+        return states[stateIndex++] ?? "";
+      }
+      if (command === "git" && arguments_[0] === "rev-parse") {
+        return `${revisions[revisionIndex++] ?? revision}\n`;
+      }
+      if (command === "make") {
+        builds += 1;
+        if (buildFails) throw new Error("private build detail");
+        return "";
+      }
+      throw new Error("unexpected command");
+    };
+    return { builds: () => builds, run };
+  }
+
+  const clean = runner();
+  assert.equal(prepareProductionPackage(clean.run), revision);
+  assert.equal(clean.builds(), 1);
+
+  const dirtyBefore = runner({ states: [" M private-file"] });
+  assert.throws(
+    () => prepareProductionPackage(dirtyBefore.run),
+    /worktree must be clean/,
+  );
+  assert.equal(dirtyBefore.builds(), 0);
+
+  assert.throws(
+    () =>
+      prepareProductionPackage(
+        runner({ states: ["", " M changed-during-build"] }).run,
+      ),
+    /worktree changed/,
+  );
+  assert.throws(
+    () =>
+      prepareProductionPackage(
+        runner({ revisions: [revision, "b".repeat(40)] }).run,
+      ),
+    /revision changed/,
+  );
+  assert.throws(
+    () => prepareProductionPackage(runner({ buildFails: true }).run),
+    /package build failed/,
+  );
+});
+
 test("security validators accept the exact restrictive policy", () => {
   verifyCommonSecurity(response(), "/");
   verifyHtmlSecurity(response(), "/");
@@ -89,7 +150,7 @@ test("security validators reject broadened and malformed policies", () => {
         }),
         "/",
       ),
-    /broadens script-src-elem/,
+    /unsupported directive/,
   );
   assert.throws(
     () =>
@@ -126,7 +187,7 @@ test("security validators reject broadened and malformed policies", () => {
         }),
         "/",
       ),
-    /payment/,
+    /broadens a feature/,
   );
 });
 
@@ -138,7 +199,7 @@ test("cache policy rejects missing, immutable, and long unversioned caching", ()
         response({ "cache-control": "public, max-age=60, immutable" }),
         "assets/site.js",
       ),
-    /unsupported immutable/,
+    /unsupported directive/,
   );
   assert.throws(
     () =>
@@ -156,7 +217,7 @@ test("cache policy rejects missing, immutable, and long unversioned caching", ()
         }),
         "assets/site.js",
       ),
-    /unsupported no-cachex/,
+    /unsupported directive/,
   );
   assert.throws(
     () =>
@@ -174,7 +235,7 @@ test("cache policy rejects missing, immutable, and long unversioned caching", ()
         response({ "cache-control": "max-age=60, max-age=300" }),
         "assets/site.js",
       ),
-    /repeats max-age/,
+    /repeats a directive/,
   );
   for (const extension of ["stale-if-error", "stale-while-revalidate"]) {
     assert.throws(
@@ -185,9 +246,28 @@ test("cache policy rejects missing, immutable, and long unversioned caching", ()
           }),
           "assets/site.js",
         ),
-      new RegExp(`unsupported ${extension}`),
+      /unsupported directive/,
     );
   }
+});
+
+test("failure messages do not echo response or internal error detail", () => {
+  const secret = "secret-internal-detail";
+  assert.equal(
+    formatFailure(new Error(`${secret} at /private/path 10.0.0.8`)),
+    "live verification could not complete",
+  );
+  assert.throws(
+    () =>
+      verifyCachePolicy(
+        response({ "cache-control": `public, ${secret}=1` }),
+        "assets/site.js",
+      ),
+    (error) =>
+      error instanceof Error &&
+      error.message.includes("unsupported directive") &&
+      !error.message.includes(secret),
+  );
 });
 
 test("status validation matches strict browser chronology and ownership", () => {
@@ -267,7 +347,11 @@ test("request timeout remains active while the response body stalls", async () =
   try {
     await assert.rejects(
       requestBytes(`http://127.0.0.1:${address.port}/`, {}, 100, 50),
-      /request failed/,
+      (error) =>
+        error instanceof Error &&
+        error.message.includes("request failed") &&
+        !error.message.includes("127.0.0.1") &&
+        !error.message.includes(String(address.port)),
     );
   } finally {
     for (const socket of sockets) socket.destroy();
@@ -275,10 +359,89 @@ test("request timeout remains active while the response body stalls", async () =
   }
 });
 
+test("reminder preflight proves a non-mutating same-origin boundary", async () => {
+  let mode = "safe";
+  const observations = [];
+  const server = createServer((request, serverResponse) => {
+    let bodyBytes = 0;
+    request.on("data", (chunk) => {
+      bodyBytes += chunk.length;
+    });
+    request.on("end", () => {
+      observations.push({
+        bodyBytes,
+        headers: request.headers,
+        method: request.method,
+        url: request.url,
+      });
+      if (mode === "wildcard") {
+        serverResponse.writeHead(204, {
+          "Access-Control-Allow-Origin": "*",
+        });
+      } else if (mode === "credentials") {
+        serverResponse.writeHead(204, {
+          "Access-Control-Allow-Credentials": "true",
+        });
+      } else if (mode === "redirect") {
+        serverResponse.writeHead(302, { Location: "/elsewhere" });
+      } else if (mode === "server-error") {
+        serverResponse.writeHead(503);
+      } else {
+        serverResponse.writeHead(405, { Allow: "POST" });
+      }
+      serverResponse.end();
+    });
+  });
+  await new Promise((resolvePromise) =>
+    server.listen(0, "127.0.0.1", resolvePromise),
+  );
+  const address = server.address();
+  assert.equal(typeof address, "object");
+  const origin = `http://127.0.0.1:${address.port}`;
+  try {
+    await verifyReminderSameOrigin(origin);
+    assert.deepEqual(
+      {
+        bodyBytes: observations[0].bodyBytes,
+        method: observations[0].method,
+        origin: observations[0].headers.origin,
+        requestHeaders:
+          observations[0].headers["access-control-request-headers"],
+        requestMethod: observations[0].headers["access-control-request-method"],
+        url: observations[0].url,
+      },
+      {
+        bodyBytes: 0,
+        method: "OPTIONS",
+        origin: "https://cross-origin.invalid",
+        requestHeaders: "content-type",
+        requestMethod: "POST",
+        url: "/api/renewal-alerts/subscriptions",
+      },
+    );
+    for (const rejectedMode of [
+      "wildcard",
+      "credentials",
+      "redirect",
+      "server-error",
+    ]) {
+      mode = rejectedMode;
+      await assert.rejects(verifyReminderSameOrigin(origin), /cross-origin/);
+    }
+  } finally {
+    await new Promise((resolvePromise) => server.close(resolvePromise));
+  }
+});
+
 test("redirect verification requires one exact path-preserving hop", async () => {
   const server = createServer((request, serverResponse) => {
     serverResponse.writeHead(301, {
-      Location: request.url === "/loop" ? "/loop" : "/target",
+      Location:
+        request.url === "/loop"
+          ? "/loop"
+          : request.url === "/leak"
+            ? "https://user:secret@private.invalid/?token=hidden"
+            : "/target",
     });
     serverResponse.end();
   });
@@ -292,11 +455,20 @@ test("redirect verification requires one exact path-preserving hop", async () =>
     await verifyRedirect(`${origin}/start`, `${origin}/target`);
     await assert.rejects(
       verifyRedirect(`${origin}/start`, `${origin}/different`),
-      /expected one redirect/,
+      /target is incorrect/,
     );
     await assert.rejects(
       verifyRedirect(`${origin}/loop`, `${origin}/target`),
-      /expected one redirect/,
+      /target is incorrect/,
+    );
+    await assert.rejects(
+      verifyRedirect(`${origin}/leak`, `${origin}/target`),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes("target is incorrect") &&
+        !error.message.includes("secret") &&
+        !error.message.includes("private.invalid") &&
+        !error.message.includes("hidden"),
     );
   } finally {
     await new Promise((resolvePromise) => server.close(resolvePromise));

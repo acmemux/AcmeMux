@@ -7,7 +7,7 @@ GO_PACKAGES := ./cmd/... ./internal/...
 export GOCACHE := $(CURDIR)/.cache/go-build
 export GOMODCACHE := $(CURDIR)/.cache/go-mod
 
-.PHONY: bootstrap browser-install build catalog distribution format-check lint run site-build site-live-verify site-static-check site-verify site-visual-update test test-accessibility test-broker test-browser test-compatibility test-configuration test-distribution test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-reporting test-runtime test-scheduler test-site test-systemd test-upgrade test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
+.PHONY: bootstrap browser-install build catalog distribution format-check lint run site-build site-live-verify site-static-check site-verify site-visual-update test test-accessibility test-broker test-browser test-compatibility test-configuration test-distribution test-filesystem test-identity test-integrations test-inventory test-jobs test-lego-integration test-nativeconfig test-provider-cloud test-provider-cloud-smoke test-provider-core test-provider-core-smoke test-race test-redaction test-reporting test-runtime test-scheduler test-site test-site-live-local test-systemd test-upgrade test-visual test-visual-update test-web test-workspace toolchain-check verify vuln web-build web-deps web-verify
 
 bootstrap: toolchain-check web-deps browser-install
 
@@ -142,6 +142,9 @@ site-live-verify: site-verify
 test-site: site-build
 	cd web && npm run test:site
 
+test-site-live-local: site-build
+	cd web && npm run test:site:live:local
+
 site-visual-update: site-build
 	cd web && npm run test:site:visual:update
 
@@ -151,6 +154,7 @@ site-verify: site-static-check
 		second="$$(sha256sum site/dist/BUILD.json | awk '{ print $$1 }')"; \
 		test "$$first" = "$$second" || (echo "public site build is not reproducible" && exit 1)
 	cd web && npm run test:site
+	cd web && npm run test:site:live:local
 
 catalog:
 	cd web && npm run catalog

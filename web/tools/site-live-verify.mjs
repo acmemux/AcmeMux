@@ -17,6 +17,20 @@ function fail(message) {
   throw new VerificationError(message);
 }
 
+function requestPath(input) {
+  try {
+    return new URL(String(input)).pathname || "/";
+  } catch {
+    return "request";
+  }
+}
+
+export function formatFailure(error) {
+  return error instanceof VerificationError
+    ? error.message
+    : "live verification could not complete";
+}
+
 function requireValue(condition, message) {
   if (!condition) fail(message);
 }
@@ -49,7 +63,7 @@ export function options(arguments_) {
       index += 1;
       continue;
     }
-    fail(`unknown argument: ${argument}`);
+    fail("unknown argument");
   }
 
   let parsed;
@@ -101,7 +115,7 @@ async function fetchBounded(input, init, consume, timeoutMilliseconds) {
     return await consume(response);
   } catch (error) {
     if (error instanceof VerificationError) throw error;
-    fail(`${input}: request failed (${error.message})`);
+    fail(`${requestPath(input)}: request failed`);
   } finally {
     clearTimeout(timeout);
   }
@@ -113,7 +127,9 @@ export async function readLimited(response, maximumBytes) {
     10,
   );
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
-    fail(`${response.url}: response exceeds ${maximumBytes} bytes`);
+    fail(
+      `${requestPath(response.url)}: response exceeds ${maximumBytes} bytes`,
+    );
   }
   const chunks = [];
   let size = 0;
@@ -125,7 +141,9 @@ export async function readLimited(response, maximumBytes) {
     size += value.length;
     if (size > maximumBytes) {
       await reader.cancel();
-      fail(`${response.url}: response exceeds ${maximumBytes} bytes`);
+      fail(
+        `${requestPath(response.url)}: response exceeds ${maximumBytes} bytes`,
+      );
     }
     chunks.push(Buffer.from(value));
   }
@@ -190,10 +208,7 @@ function verifyContentType(response, path) {
   const expected = contentTypes.get(extname(path));
   requireValue(expected, `${path}: no expected content type is defined`);
   const actual = response.headers.get("content-type") ?? "";
-  requireValue(
-    expected.test(actual),
-    `${path}: unexpected content type ${actual}`,
-  );
+  requireValue(expected.test(actual), `${path}: unexpected content type`);
 }
 
 function parseUniqueDirectives(value, separator, label, path) {
@@ -202,7 +217,7 @@ function parseUniqueDirectives(value, separator, label, path) {
     const tokens = part.trim().split(/\s+/).filter(Boolean);
     if (tokens.length === 0) continue;
     const name = tokens.shift().toLowerCase();
-    requireValue(!directives.has(name), `${path}: duplicate ${label} ${name}`);
+    requireValue(!directives.has(name), `${path}: duplicate ${label}`);
     directives.set(
       name,
       tokens.map((token) => token.toLowerCase()),
@@ -234,7 +249,7 @@ function parsePermissions(value, path) {
     const name = match[1].toLowerCase();
     requireValue(
       !features.has(name),
-      `${path}: duplicate Permissions-Policy feature ${name}`,
+      `${path}: duplicate Permissions-Policy feature`,
     );
     features.set(name, match[2].replace(/\s+/g, ""));
   }
@@ -299,11 +314,11 @@ export function verifyCachePolicy(response, path) {
     const name = match[1].toLowerCase();
     requireValue(
       allowedDirectives.has(name),
-      `${path}: Cache-Control contains unsupported ${name}`,
+      `${path}: Cache-Control contains an unsupported directive`,
     );
     requireValue(
       !directives.has(name),
-      `${path}: Cache-Control repeats ${name}`,
+      `${path}: Cache-Control repeats a directive`,
     );
     directives.set(name, match[2] ?? match[3] ?? null);
   }
@@ -377,7 +392,10 @@ export function verifyHtmlSecurity(response, path) {
     "upgrade-insecure-requests",
   ]);
   for (const [name, tokens] of directives) {
-    requireValue(allowedDirectives.has(name), `${path}: CSP broadens ${name}`);
+    requireValue(
+      allowedDirectives.has(name),
+      `${path}: CSP contains an unsupported directive`,
+    );
     if (name === "upgrade-insecure-requests") {
       requireValue(tokens.length === 0, `${path}: malformed CSP ${name}`);
     }
@@ -426,10 +444,10 @@ export function verifyHtmlSecurity(response, path) {
     response.headers.get("permissions-policy") ?? "",
     path,
   );
-  for (const [feature, value] of permissions) {
+  for (const value of permissions.values()) {
     requireValue(
       value === "()",
-      `${path}: Permissions-Policy broadens ${feature}`,
+      `${path}: Permissions-Policy broadens a feature`,
     );
   }
   for (const feature of [
@@ -543,54 +561,53 @@ function tlsEvidence(hostname) {
       rejectUnauthorized: true,
       servername: hostname,
     });
-    const failConnection = (error) => {
+    const failConnection = () => {
       socket.destroy();
       rejectPromise(
-        new Error(`${hostname}: TLS inspection failed (${error.message})`),
+        new VerificationError(`${hostname}: TLS inspection failed`),
       );
     };
-    socket.setTimeout(requestTimeoutMilliseconds, () =>
-      failConnection(new Error("timeout")),
-    );
+    socket.setTimeout(requestTimeoutMilliseconds, () => failConnection());
     socket.once("error", failConnection);
     socket.once("secureConnect", () => {
-      const certificate = socket.getPeerCertificate(true);
       socket.removeListener("error", failConnection);
-      socket.destroy();
-      if (!socket.authorized) {
-        rejectPromise(new Error(`${hostname}: TLS peer is not authorized`));
-        return;
-      }
-      if (!certificate.raw) {
-        rejectPromise(
-          new Error(`${hostname}: TLS peer certificate is unavailable`),
+      try {
+        const certificate = socket.getPeerCertificate(true);
+        socket.destroy();
+        requireValue(
+          socket.authorized,
+          `${hostname}: TLS peer is not authorized`,
         );
-        return;
-      }
-      const parsed = new X509Certificate(certificate.raw);
-      if (!parsed.checkHost(hostname)) {
-        rejectPromise(
-          new Error(
-            `${hostname}: TLS peer certificate does not cover the host`,
-          ),
+        requireValue(
+          certificate.raw,
+          `${hostname}: TLS peer certificate is unavailable`,
         );
-        return;
-      }
-      const issuedAt = Date.parse(parsed.validFrom);
-      const expiresAt = Date.parse(parsed.validTo);
-      if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)) {
-        rejectPromise(
-          new Error(`${hostname}: TLS peer lifetime cannot be parsed`),
+        const parsed = new X509Certificate(certificate.raw);
+        requireValue(
+          parsed.checkHost(hostname),
+          `${hostname}: TLS peer certificate does not cover the host`,
         );
-        return;
+        const issuedAt = Date.parse(parsed.validFrom);
+        const expiresAt = Date.parse(parsed.validTo);
+        requireValue(
+          Number.isFinite(issuedAt) && Number.isFinite(expiresAt),
+          `${hostname}: TLS peer lifetime cannot be parsed`,
+        );
+        resolvePromise({
+          expiresAt,
+          fingerprintSha256: createHash("sha256")
+            .update(certificate.raw)
+            .digest("hex"),
+          issuedAt,
+        });
+      } catch (error) {
+        socket.destroy();
+        rejectPromise(
+          error instanceof VerificationError
+            ? error
+            : new VerificationError(`${hostname}: TLS inspection failed`),
+        );
       }
-      resolvePromise({
-        expiresAt,
-        fingerprintSha256: createHash("sha256")
-          .update(certificate.raw)
-          .digest("hex"),
-        issuedAt,
-      });
     });
   });
 }
@@ -612,14 +629,15 @@ export function verifyTlsMatch(status, apex, www) {
 
 export async function verifyRedirect(input, expected) {
   const response = await requestHeaders(input);
+  const path = requestPath(input);
   requireValue(
     response.status === 301 || response.status === 308,
-    `${input}: expected a permanent redirect, received ${response.status}`,
+    `${path}: expected a permanent redirect, received ${response.status}`,
   );
   const location = response.headers.get("location") ?? "";
   requireValue(
     new URL(location, input).href === expected,
-    `${input}: expected one redirect to ${expected}, received ${location}`,
+    `${path}: permanent redirect target is incorrect`,
   );
   if (input.startsWith("https://")) {
     verifyCommonSecurity(response, new URL(input).pathname);
@@ -647,8 +665,8 @@ async function verifyPublicContracts(origin, publicPaths) {
   let statusValue;
   try {
     statusValue = JSON.parse(statusBody.toString("utf8"));
-  } catch (error) {
-    fail(`/certificate-status.json: invalid JSON (${error.message})`);
+  } catch {
+    fail("/certificate-status.json: invalid JSON");
   }
   const status = parseStatus(statusValue);
   const [apex, www] = await Promise.all([
@@ -681,6 +699,7 @@ async function verifyPublicContracts(origin, publicPaths) {
       .includes("POST"),
     "/api/renewal-alerts/subscriptions: 405 response must allow POST",
   );
+  await verifyReminderSameOrigin(origin);
 
   for (const path of publicPaths) {
     const expected = new URL(path, "https://acmemux.com").href;
@@ -711,6 +730,86 @@ async function verifyPublicContracts(origin, publicPaths) {
   );
 }
 
+export async function verifyReminderSameOrigin(origin) {
+  const path = "/api/renewal-alerts/subscriptions";
+  const response = await requestHeaders(new URL(path, `${origin}/`), {
+    headers: {
+      "Access-Control-Request-Headers": "content-type",
+      "Access-Control-Request-Method": "POST",
+      Origin: "https://cross-origin.invalid",
+    },
+    method: "OPTIONS",
+  });
+  requireValue(
+    response.status >= 200 &&
+      response.status < 500 &&
+      (response.status < 300 || response.status >= 400),
+    `${path}: cross-origin preflight did not fail safely`,
+  );
+  requireValue(
+    !response.headers.has("access-control-allow-origin"),
+    `${path}: cross-origin preflight authorizes an origin`,
+  );
+  requireValue(
+    response.headers.get("access-control-allow-credentials")?.toLowerCase() !==
+      "true",
+    `${path}: cross-origin preflight authorizes credentials`,
+  );
+}
+
+export function prepareProductionPackage(runCommand = execFileSync) {
+  const runGit = (arguments_, failure) => {
+    try {
+      return runCommand("git", arguments_, {
+        cwd: applicationDirectory,
+        encoding: "utf8",
+        stdio: "pipe",
+      });
+    } catch {
+      fail(failure);
+    }
+  };
+  const sourceState = () =>
+    runGit(
+      ["status", "--porcelain", "--untracked-files=normal"],
+      "application source state is unavailable",
+    ).trim();
+  const sourceRevision = () =>
+    runGit(
+      ["rev-parse", "HEAD"],
+      "application source revision is unavailable",
+    ).trim();
+
+  requireValue(
+    sourceState() === "",
+    "application worktree must be clean before production verification",
+  );
+  const beforeRevision = sourceRevision();
+  requireValue(
+    /^[0-9a-f]{40}$/.test(beforeRevision),
+    "application source revision is unavailable",
+  );
+  try {
+    runCommand("make", ["--no-print-directory", "site-build"], {
+      cwd: applicationDirectory,
+      encoding: "utf8",
+      stdio: "pipe",
+    });
+  } catch {
+    fail("public site package build failed");
+  }
+  requireValue(
+    sourceState() === "",
+    "application worktree changed while building the production package",
+  );
+  const afterRevision = sourceRevision();
+  requireValue(
+    afterRevision === beforeRevision,
+    "application revision changed while building the production package",
+  );
+  return beforeRevision;
+}
+
 async function main() {
   const { origin, packageOnly } = options(process.argv.slice(2));
   let sourceRevision = "local-preview";
@@ -719,30 +818,19 @@ async function main() {
       process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0",
       "NODE_TLS_REJECT_UNAUTHORIZED must not disable certificate validation",
     );
-    const sourceState = execFileSync(
-      "git",
-      ["status", "--porcelain", "--untracked-files=normal"],
-      { cwd: applicationDirectory, encoding: "utf8" },
-    );
-    requireValue(
-      sourceState.trim() === "",
-      "application worktree must be clean before production verification",
-    );
-    sourceRevision = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: applicationDirectory,
-      encoding: "utf8",
-    }).trim();
-    requireValue(
-      /^[0-9a-f]{40}$/.test(sourceRevision),
-      "application source revision is unavailable",
-    );
+    sourceRevision = prepareProductionPackage();
   }
-  const localBuild = await readFile(join(outputDirectory, "BUILD.json"));
+  let localBuild;
+  try {
+    localBuild = await readFile(join(outputDirectory, "BUILD.json"));
+  } catch {
+    fail("site package manifest is unavailable");
+  }
   let manifest;
   try {
     manifest = JSON.parse(localBuild.toString("utf8"));
-  } catch (error) {
-    fail(`site/dist/BUILD.json is invalid (${error.message})`);
+  } catch {
+    fail("site/dist/BUILD.json is invalid");
   }
   requireValue(
     manifest.format === 1 &&
@@ -804,7 +892,7 @@ if (import.meta.url === invokedPath) {
   try {
     await main();
   } catch (error) {
-    console.error(`FAIL: ${error.message}`);
+    console.error(`FAIL: ${formatFailure(error)}`);
     process.exitCode = 1;
   }
 }
